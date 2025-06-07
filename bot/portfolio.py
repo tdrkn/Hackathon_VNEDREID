@@ -1,3 +1,4 @@
+
 """Tinkoff Invest — портфель с «умным» столбцом Risk
 ===================================================
 
@@ -24,6 +25,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
+
 try:
     from tinkoff.invest import Client, InstrumentIdType  # type: ignore
     from tinkoff.invest.exceptions import UnauthenticatedError  # type: ignore
@@ -32,6 +34,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
     sys.stderr.write("[FATAL] pip install tinkoff-investments \u2013 \u043f\u0430\u043a\u0435\u0442 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.\n")
     raise SystemExit(1) from exc
+
 
 _RISK_STR = {0: "-", 1: "HIGH", 2: "MODERATE", 3: "LOW", 4: "MINIMAL"}
 
@@ -43,6 +46,7 @@ DEFAULT_RISK_BY_TYPE = {
     "sp": "HIGH",
     "future": "HIGH",
 }
+
 
 
 TOKEN_ENV = "TINKOFF_INVEST_TOKEN"
@@ -124,6 +128,7 @@ def main() -> None:
     if not accounts:
         print("Нет счетов.")
         return
+
 
     acc_id = args.account or accounts[0].id
 
