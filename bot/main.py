@@ -11,6 +11,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
+
 from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
@@ -137,6 +138,7 @@ def _parse_hours(args) -> int:
 
 
 
+
 async def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker from Postgres database."""
     if PG_POOL is None:
@@ -149,6 +151,7 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
     for art in articles_data[:limit]:
         text = art.get('body') or ''
         summary = summarize_text(text) if text else ''
+
         digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
 
     return '\n\n'.join(digest_parts)
@@ -158,6 +161,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
+
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
 
     )
@@ -172,7 +176,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
+
         '/log - показать последние строки лога\n'
+
         '/help - показать эту справку'
 
     )
@@ -256,6 +262,21 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Файл лога не найден.')
 
 
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send recent news from all RSS feeds for the given period."""
+    hours = _parse_hours(context.args)
+    articles = collect_recent_news(hours)
+    if not articles:
+        await update.message.reply_text('Новостей нет.')
+        return
+
+    save_articles_to_csv(articles)
+    save_news_to_csv(articles)
+
+    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
+    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
+
+
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
@@ -279,7 +300,9 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
+
     app.add_handler(CommandHandler('log', show_log))
+
 
     app.run_polling()
 
