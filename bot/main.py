@@ -9,7 +9,13 @@ from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
 import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,6 +28,11 @@ from .postgres import (
 from .rss_collector import collect_recent_news_async
 
 from .storage import save_articles_to_csv_async, CSV_PATH
+from .mybag import (
+    get_portfolio_text,
+    load_token,
+    save_token,
+)
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -30,6 +41,7 @@ LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
 # Thread pool for future blocking tasks
 THREAD_POOL = ThreadPoolExecutor(max_workers=int(os.getenv('WORKERS', '8')))
 PG_POOL = None
+WAITING_TOKEN = set()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +58,9 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute(
             'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
+        )
+        await conn.execute(
+            'CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)'
         )
         await conn.commit()
 
@@ -155,7 +170,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /log, /rank, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /log, /rank, /mybag, /help'
 
     )
 
@@ -171,6 +186,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/news [hours|days|weeks N] - свежие новости за период\n'
         '/csv - скачать текущий CSV файл со статьями\n'
         '/log - показать последние строки лога\n'
+        '/mybag - показать портфель Тинькофф Инвест\n'
         '/help - показать эту справку'
 
     )
@@ -234,6 +250,32 @@ async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
     await update.message.reply_text('\n'.join(lines))
     logging.info("Rank command used by %s", update.effective_user.id)
+
+
+async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user portfolio using stored token or ask for it."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if token:
+        await update.message.reply_text('Получаю портфель, пожалуйста подождите...')
+        text = await get_portfolio_text(token)
+        await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+        return
+
+    WAITING_TOKEN.add(user_id)
+    await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+
+
+async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if user_id not in WAITING_TOKEN:
+        return
+    token = update.message.text.strip()
+    await save_token(user_id, token)
+    WAITING_TOKEN.discard(user_id)
+    await update.message.reply_text('Токен сохранён. Получаю портфель...')
+    text = await get_portfolio_text(token)
+    await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
 
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -303,6 +345,8 @@ def main():
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('csv', send_csv))
     app.add_handler(CommandHandler('log', show_log))
+    app.add_handler(CommandHandler('mybag', mybag))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 
     app.run_polling()
