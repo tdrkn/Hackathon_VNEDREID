@@ -3,6 +3,10 @@
 
 Простой бот, который позволяет подписаться на тикеры акций и получать по ним краткий обзор новостей.
 
+## Требования
+- Python 3.11 или новее
+- файл `.env` c переменной `TELEGRAM_TOKEN`
+
 ## Возможности
 - `/start` и `/help` — вывод подсказок
 - `/subscribe <TICKER>` и `/unsubscribe <TICKER>` — управление подписками
@@ -50,6 +54,8 @@
    python -m bot.main
    ```
 
+При первом запуске будет создан файл `bot/subscriptions.db` для хранения подписок.
+
 
 После запуска бот начнёт опрашивать Telegram и реагировать на команды пользователей.
 
@@ -60,4 +66,13 @@
 ```bash
 psql -d mydb -c "\COPY news(title,body,published_at,source,news_type,region,topics,related_markets,macro_sensitive,likely_to_influence,influence_reason) FROM 'news.csv' CSV HEADER"
 ```
+
+## Ручной сбор новостей
+Вы можете выгрузить свежие статьи без запуска телеграм-бота:
+
+```bash
+python -m bot.rss_collector
+```
+
+В каталоге появится файл `news_YYYY-MM-DD.csv` со всеми публикациями за день.
 
