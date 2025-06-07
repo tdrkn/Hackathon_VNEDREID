@@ -103,21 +103,6 @@ async def pg_shutdown(app) -> None:
         await PG_POOL.close()
 
 
-async def pg_startup(app) -> None:
-    global PG_POOL
-    try:
-        PG_POOL = await init_pg_pool()
-        await ensure_schema(PG_POOL)
-    except Exception as e:
-        logging.error("PostgreSQL unavailable: %s", e)
-        PG_POOL = None
-
-
-async def pg_shutdown(app) -> None:
-    if PG_POOL:
-        await PG_POOL.close()
-
-
 def summarize_text(text: str, sentences: int = 3) -> str:
     parser = PlaintextParser.from_string(text, Tokenizer('english'))
     summarizer = LsaSummarizer()
@@ -279,6 +264,12 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send current news CSV file to the user."""
+
+    # Ensure event loop exists for python-telegram-bot
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     if os.path.exists(CSV_PATH):
         with open(CSV_PATH, 'rb') as f:
