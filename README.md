@@ -8,6 +8,7 @@
 - `/subscribe <TICKER>` и `/unsubscribe <TICKER>` — управление подписками
 - `/digest` — получение новостного дайджеста по подписанным тикерам
 - `/rank` — список самых популярных тикеров
+- `/news [hours|days|weeks N]` — свежие новости за указанный период
 
 Подписки хранятся в базе данных SQLite, поэтому сохраняются между перезапусками.
 
@@ -36,6 +37,17 @@
 
    ```bash
    docker run --env-file .env telegram-digest-bot
+   ```
+
+## Запуск без Docker
+1. Создайте файл `.env` с переменной `TELEGRAM_TOKEN` на подобие `.env.example`.
+2. Установите зависимости:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Запустите бота командой:
+   ```bash
+   python -m bot.main
    ```
 
 
