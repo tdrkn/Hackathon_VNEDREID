@@ -109,36 +109,6 @@ def make_resolver(instr: InstrumentsService):
     return resolve
 
 
-def load_portfolio(token: str, account_id: Optional[str] | None = None):
-    """Return portfolio data as a list of tuples.
-
-    Each tuple contains ``figi, ticker, name, qty, curr, price, value, risk``.
-    Returns a tuple ``(acc_id, positions)`` where ``positions`` is a list.
-    """
-
-    with Client(token=token) as cli:
-        accounts = cli.users.get_accounts().accounts
-        if not accounts:
-            raise RuntimeError("Нет счетов")
-
-        acc_id = account_id or accounts[0].id
-        positions = cli.operations.get_portfolio(account_id=acc_id).positions
-        resolve = make_resolver(cli.instruments)
-
-        rows = []
-        for p in positions:
-            figi = p.figi
-            qty = q_to_float(p.quantity)
-            curr = p.average_position_price.currency or "-"
-            price = q_to_float(p.current_price)
-            value = price * qty
-            ticker, name, risk = resolve(p.instrument_uid, figi, p.instrument_type, curr)
-            rows.append((figi, ticker, name, qty, curr, price, value, risk))
-
-    return acc_id, rows
-
-
-
 def main() -> None:
     parser = argparse.ArgumentParser("Show portfolio with heuristic risk level")
     parser.add_argument("--token", required=False)
@@ -148,30 +118,43 @@ def main() -> None:
     token = pick_token(args.token)
 
     try:
-
-        acc_id, rows = load_portfolio(token, args.account)
+        with Client(token=token) as cli:
+            accounts = cli.users.get_accounts().accounts
     except UnauthenticatedError:
         sys.stderr.write("[AUTH] Токен отклонён.\n")
         raise SystemExit(1)
-    except Exception as exc:
-        sys.stderr.write(f"[ERROR] {exc}\n")
-        raise SystemExit(1)
 
-    print(
-        f"\nPortfolio for account {acc_id} — {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
-    )
-    header = (
-        f"{'FIGI':<12} {'Ticker':<8} {'Name':<30} {'Qty':>10} {'Curr':<6} "
-        f"{'Price':>14} {'Value':>14} {'Risk':<8}"
-    )
-    print(header)
-    print("-" * len(header))
+    if not accounts:
+        print("Нет счетов.")
+        return
 
-    for figi, ticker, name, qty, curr, price, value, risk in rows:
+
+    acc_id = args.account or accounts[0].id
+
+    with Client(token=token) as cli:
+        positions = cli.operations.get_portfolio(account_id=acc_id).positions
+        resolve = make_resolver(cli.instruments)
+
         print(
-            f"{figi:<12} {ticker:<8} {name:<30} {qty:10,.3f} {curr:<6} {price:14,.2f} {value:14,.2f} {risk:<8}"
+            f"\nPortfolio for account {acc_id} — {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
         )
+        header = (
+            f"{'FIGI':<12} {'Ticker':<8} {'Name':<30} {'Qty':>10} {'Curr':<6} "
+            f"{'Price':>14} {'Value':>14} {'Risk':<8}"
+        )
+        print(header)
+        print("-" * len(header))
 
+        for p in positions:
+            figi = p.figi
+            qty = q_to_float(p.quantity)
+            curr = p.average_position_price.currency or "-"
+            price = q_to_float(p.current_price)
+            value = price * qty
+            ticker, name, risk = resolve(p.instrument_uid, figi, p.instrument_type, curr)
+            print(
+                f"{figi:<12} {ticker:<8} {name:<30} {qty:10,.3f} {curr:<6} {price:14,.2f} {value:14,.2f} {risk:<8}"
+            )
 
 
 if __name__ == "__main__":
