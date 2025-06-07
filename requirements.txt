@@ -1,0 +1,5 @@
+python-telegram-bot>=20.0
+feedparser
+newspaper3k
+sumy
+python-dotenv
