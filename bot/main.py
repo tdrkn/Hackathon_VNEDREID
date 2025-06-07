@@ -264,8 +264,10 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send current news CSV file to the user."""
+
     if os.path.exists(CSV_PATH):
         with open(CSV_PATH, 'rb') as f:
+
             await update.message.reply_document(f, filename='articles.csv')
     else:
         await update.message.reply_text('Файл articles.csv не найден.')
