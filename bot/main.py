@@ -170,7 +170,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /log, /rank, /help'
 
     )
 
@@ -184,6 +184,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
+        '/csv - скачать текущий CSV файл со статьями\n'
         '/log - показать последние строки лога\n'
         '/help - показать эту справку'
 
@@ -275,6 +276,16 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text('Файл лога не найден.')
 
+
+async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send current news CSV file to the user."""
+    path = 'articles.csv'
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            await update.message.reply_document(f, filename='articles.csv')
+    else:
+        await update.message.reply_text('Файл articles.csv не найден.')
+
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
@@ -298,6 +309,7 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
+    app.add_handler(CommandHandler('csv', send_csv))
     app.add_handler(CommandHandler('log', show_log))
 
 
