@@ -83,7 +83,9 @@ def collect_today_news() -> pd.DataFrame:
 
     for source, url in RSS_FEEDS.items():
         feed = _get_feed(url)
-        for entry in feed.entries:
+    records = df.to_dict(orient="records")
+    save_articles_to_csv(records, path)
+    save_articles_to_db(records)
             entry_date_struct = entry.get("published_parsed") or entry.get("updated_parsed")
             if _is_today(entry_date_struct):
                 link = entry.get("link", "")

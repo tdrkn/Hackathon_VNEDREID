@@ -9,8 +9,16 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 load_dotenv()
-
-from .rss_collector import collect_ticker_news, collect_recent_news
+from .storage import save_articles_to_csv, save_articles_to_db
+LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding='utf-8'),
+        logging.StreamHandler(),
+    ],
+)
 
 from .storage import save_articles_to_csv
 
@@ -84,7 +92,26 @@ def summarize_text(text: str, sentences: int = 3) -> str:
 
 def _parse_hours(args) -> int:
     """Parse time interval arguments and return hours."""
-    if not args:
+    save_articles_to_db(articles_data)
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
+        '/log - показать последние строки лога\n'
+    logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
+    logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
+    logging.info("Digest sent to %s for %d tickers", update.effective_user.id, len(tickers))
+    logging.info("Rank command used by %s", update.effective_user.id)
+    save_articles_to_db(articles)
+    logging.info("News command used by %s, %d articles", update.effective_user.id, len(articles))
+
+
+async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send last 20 lines of the log file."""
+    if os.path.exists(LOG_PATH):
+        with open(LOG_PATH, 'r', encoding='utf-8') as f:
+            lines = f.readlines()[-20:]
+        await update.message.reply_text(''.join(lines) or 'Лог пуст.')
+    else:
+        await update.message.reply_text('Файл лога не найден.')
+    app.add_handler(CommandHandler('log', show_log))
         return 24
     unit = args[0].lower()
     qty = 1
