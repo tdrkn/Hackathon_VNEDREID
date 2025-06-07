@@ -2,6 +2,8 @@ import os
 import logging
 
 import aiosqlite
+import pandas as pd
+import io
 
 
 from sumy.parsers.plaintext import PlaintextParser
@@ -24,12 +26,15 @@ from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
     fetch_by_ticker,
+    replace_portfolio,
+    fetch_portfolio,
 )
 from .rss_collector import collect_recent_news_async
 
 from .storage import save_articles_to_csv_async, CSV_PATH
 from .mybag import (
     get_portfolio_text,
+    get_portfolio_data,
     load_token,
     save_token,
 )
@@ -170,7 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /log, /rank, /mybag, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
 
     )
 
@@ -185,10 +190,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
         '/csv - скачать текущий CSV файл со статьями\n'
+        '/csvbag - скачать ваш портфель в CSV\n'
         '/log - показать последние строки лога\n'
         '/mybag - показать портфель Тинькофф Инвест\n'
         '/help - показать эту справку'
-
     )
 
 
@@ -259,6 +264,12 @@ async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if token:
         await update.message.reply_text('Получаю портфель, пожалуйста подождите...')
         text = await get_portfolio_text(token)
+        rows = await get_portfolio_data(token)
+        if PG_POOL:
+            try:
+                await replace_portfolio(PG_POOL, user_id, rows)
+            except Exception as e:
+                logging.error('Failed to save portfolio: %s', e)
         await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
         return
 
@@ -275,6 +286,12 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
     WAITING_TOKEN.discard(user_id)
     await update.message.reply_text('Токен сохранён. Получаю портфель...')
     text = await get_portfolio_text(token)
+    rows = await get_portfolio_data(token)
+    if PG_POOL:
+        try:
+            await replace_portfolio(PG_POOL, user_id, rows)
+        except Exception as e:
+            logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
 
 
@@ -309,10 +326,27 @@ async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if os.path.exists(CSV_PATH):
         with open(CSV_PATH, 'rb') as f:
-
             await update.message.reply_document(f, filename='articles.csv')
     else:
         await update.message.reply_text('Файл articles.csv не найден.')
+
+
+async def send_csvbag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send user's portfolio as CSV file."""
+    if PG_POOL is None:
+        await update.message.reply_text('База данных недоступна.')
+        return
+    user_id = update.effective_user.id
+    rows = await fetch_portfolio(PG_POOL, user_id)
+    if not rows:
+        await update.message.reply_text('Данных портфеля нет.')
+        return
+    df = pd.DataFrame(rows)
+    csv_bytes = df.to_csv(index=False).encode('utf-8')
+    buffer = io.BytesIO(csv_bytes)
+    buffer.name = 'portfolio.csv'
+    buffer.seek(0)
+    await update.message.reply_document(buffer, filename='portfolio.csv')
 
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
@@ -344,6 +378,7 @@ def main():
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('csv', send_csv))
+    app.add_handler(CommandHandler('csvbag', send_csvbag))
     app.add_handler(CommandHandler('log', show_log))
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
