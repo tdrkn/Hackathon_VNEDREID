@@ -1,20 +1,39 @@
 import os
 import logging
 import sqlite3
-import feedparser
-from newspaper import Article
+
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
-from .rss_collector import RSS_FEEDS
+from .postgres import (
+    init_pool as init_pg_pool,
+    ensure_schema,
+    fetch_by_ticker,
+)
+from .rss_collector import collect_recent_news_async
+from .storage import save_articles_to_csv
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
+LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
 
-logging.basicConfig(level=logging.INFO)
+# Thread pool for future blocking tasks
+THREAD_POOL = ThreadPoolExecutor(max_workers=int(os.getenv('WORKERS', '8')))
+PG_POOL = None
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding='utf-8'),
+        logging.StreamHandler(),
+    ],
+)
 
 
 def init_db():
@@ -72,6 +91,21 @@ def get_rankings():
     return rows
 
 
+async def pg_startup(app) -> None:
+    global PG_POOL
+    try:
+        PG_POOL = await init_pg_pool()
+        await ensure_schema(PG_POOL)
+    except Exception as e:
+        logging.error("PostgreSQL unavailable: %s", e)
+        PG_POOL = None
+
+
+async def pg_shutdown(app) -> None:
+    if PG_POOL:
+        await PG_POOL.close()
+
+
 def summarize_text(text: str, sentences: int = 3) -> str:
     parser = PlaintextParser.from_string(text, Tokenizer('english'))
     summarizer = LsaSummarizer()
@@ -79,40 +113,52 @@ def summarize_text(text: str, sentences: int = 3) -> str:
     return ' '.join(str(sentence) for sentence in summary)
 
 
-def get_news_digest(ticker: str, limit: int = 3) -> str:
-    ticker_up = ticker.upper()
-    articles = []
-    for source, url in RSS_FEEDS.items():
-        feed = feedparser.parse(url)
-        for entry in feed.entries:
-            text = f"{entry.get('title', '')} {entry.get('summary', '')}"
-            if ticker_up in text.upper():
-                link = entry.get('link')
-                try:
-                    article = Article(link)
-                    article.download()
-                    article.parse()
-                    summary = summarize_text(article.text)
-                    articles.append(f"*{entry.title}*\n{summary}\n{link}")
-                except Exception as e:
-                    logging.error('Failed to process article %s: %s', link, e)
-                    articles.append(f"{entry.title}\n{link}")
-            if len(articles) >= limit:
-                break
-        if len(articles) >= limit:
-            break
+def _parse_hours(args) -> int:
+    """Parse time interval arguments and return hours."""
+    if not args:
+        return 24
+    unit = args[0].lower()
+    qty = 1
+    if len(args) > 1:
+        try:
+            qty = int(args[1])
+        except ValueError:
+            qty = 1
+    if unit.startswith('hour'):
+        return qty
+    if unit.startswith('day'):
+        return qty * 24
+    if unit.startswith('week'):
+        return qty * 24 * 7
+    try:
+        return int(unit)
+    except ValueError:
+        return 24
 
-    if not articles:
+
+
+async def get_news_digest(ticker: str, limit: int = 3) -> str:
+    """Return news digest for ticker from Postgres database."""
+    if PG_POOL is None:
+        return 'База данных недоступна.'
+    articles_data = await fetch_by_ticker(PG_POOL, ticker, limit * 5)
+    if not articles_data:
         return 'Статьи не найдены.'
 
-    return '\n\n'.join(articles)
+    digest_parts = []
+    for art in articles_data[:limit]:
+        text = art.get('body') or ''
+        summary = summarize_text(text) if text else ''
+        digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
+
+    return '\n\n'.join(digest_parts)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /rank, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
 
     )
 
@@ -125,6 +171,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/unsubscribe <TICKER> - отписаться от тикера\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
+        '/news [hours|days|weeks N] - свежие новости за период\n'
+        '/log - показать последние строки лога\n'
         '/help - показать эту справку'
 
     )
@@ -139,6 +187,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ticker = context.args[0]
     add_subscription(update.effective_user.id, ticker)
     await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
+    logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
 
 
 
@@ -150,6 +199,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     ticker = context.args[0]
     remove_subscription(update.effective_user.id, ticker)
     await update.message.reply_text(f'Вы отписались от {ticker.upper()}')
+    logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
 
 
 
@@ -160,11 +210,12 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('У вас нет подписок.')
 
         return
-    messages = []
-    for t in tickers:
-        digest_text = get_news_digest(t)
-        messages.append(f'*{t}*\n{digest_text}')
+    await update.message.reply_text('Собираю новости, пожалуйста подождите...')
+    tasks = [asyncio.create_task(get_news_digest(t)) for t in tickers]
+    digests = await asyncio.gather(*tasks)
+    messages = [f'*{t}*\n{d}' for t, d in zip(tickers, digests)]
     await update.message.reply_text('\n\n'.join(messages), parse_mode='Markdown')
+    logging.info("Digest sent to %s for %d tickers", update.effective_user.id, len(tickers))
 
 
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -176,6 +227,33 @@ async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
     await update.message.reply_text('\n'.join(lines))
+    logging.info("Rank command used by %s", update.effective_user.id)
+
+
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fetch recent news from RSS feeds and send the headlines."""
+    hours = _parse_hours(context.args)
+    await update.message.reply_text('Собираю новости, пожалуйста подождите...')
+    articles = await collect_recent_news_async(hours)
+    if not articles:
+        await update.message.reply_text('Новостей нет.')
+        return
+
+    save_articles_to_csv(articles, 'articles.csv')
+
+    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
+    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
+    logging.info("News command used by %s, %d articles", update.effective_user.id, len(articles))
+
+
+async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send last 20 lines of the log file."""
+    if os.path.exists(LOG_PATH):
+        with open(LOG_PATH, 'r', encoding='utf-8') as f:
+            lines = f.readlines()[-20:]
+        await update.message.reply_text(''.join(lines) or 'Лог пуст.')
+    else:
+        await update.message.reply_text('Файл лога не найден.')
 
 
 def main():
@@ -185,7 +263,14 @@ def main():
 
     init_db()
 
-    app = ApplicationBuilder().token(token).build()
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .concurrent_updates(True)
+        .post_init(pg_startup)
+        .post_shutdown(pg_shutdown)
+        .build()
+    )
 
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
@@ -193,6 +278,8 @@ def main():
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
+    app.add_handler(CommandHandler('news', news))
+    app.add_handler(CommandHandler('log', show_log))
 
     app.run_polling()
 
