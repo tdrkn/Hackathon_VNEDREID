@@ -36,21 +36,7 @@ def add_subscription(user_id: int, ticker: str):
     conn.commit()
     conn.close()
 
-
-def remove_subscription(user_id: int, ticker: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
-        (user_id, ticker.upper()),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_subscriptions(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+@@ -52,66 +54,74 @@ def get_subscriptions(user_id: int):
     c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
     rows = c.fetchall()
     conn.close()
@@ -78,7 +64,6 @@ def summarize_text(text: str, sentences: int = 3) -> str:
 def get_news_digest(ticker: str, limit: int = 3) -> str:
     ticker_up = ticker.upper()
     articles = []
-
     for source, url in RSS_FEEDS.items():
         feed = feedparser.parse(url)
         for entry in feed.entries:
@@ -125,6 +110,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/help - показать эту справку'
 
     )
+
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
