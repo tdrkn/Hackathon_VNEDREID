@@ -1,6 +1,9 @@
 import os
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 import feedparser
 import pandas as pd
@@ -12,12 +15,23 @@ from .storage import save_articles_to_csv, save_articles_to_db
 _FEED_CACHE: Dict[str, feedparser.FeedParserDict] = {}
 _ARTICLE_CACHE: Dict[str, str] = {}
 
+# Executor for heavy network operations
+EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("WORKERS", "8")))
+
+
 
 def _get_feed(url: str):
     """Return parsed feed, caching results to avoid redundant network calls."""
     if url not in _FEED_CACHE:
         _FEED_CACHE[url] = feedparser.parse(url)
     return _FEED_CACHE[url]
+
+
+
+async def _get_feed_async(url: str):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(EXECUTOR, _get_feed, url)
+
 
 
 def _get_article_text(url: str) -> str:
@@ -35,6 +49,12 @@ def _get_article_text(url: str) -> str:
         text = ""
     _ARTICLE_CACHE[url] = text
     return text
+
+
+
+async def _get_article_text_async(url: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(EXECUTOR, _get_article_text, url)
 
 
 RSS_FEEDS: Dict[str, str] = {
@@ -112,10 +132,13 @@ def save_today_news(directory: str = ".") -> str:
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     path = os.path.join(directory, f"news_{today_str}.csv")
-    save_articles_to_csv(df.to_dict(orient="records"), path)
+
+    records = df.to_dict(orient="records")
+    save_articles_to_csv(records, path)
+    save_articles_to_db(records)
+
     print(f"[\u2714] \u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e {len(df)} \u043d\u043e\u0432\u043e\u0441\u0442\u0435\u0439 \u0432 {path}")
     return path
-
 
 
 def collect_recent_news(hours: int = 24) -> List[dict]:
@@ -145,6 +168,45 @@ def collect_recent_news(hours: int = 24) -> List[dict]:
     return collected
 
 
+
+async def collect_recent_news_async(hours: int = 24) -> List[dict]:
+    """Asynchronous version of collect_recent_news using threads."""
+    tasks = [
+        asyncio.create_task(_collect_recent_from_feed_async(source, url, hours))
+        for source, url in RSS_FEEDS.items()
+    ]
+    results = await asyncio.gather(*tasks)
+    collected: List[dict] = []
+    for articles in results:
+        collected.extend(articles)
+    return collected
+
+
+async def _collect_recent_from_feed_async(source: str, url: str, hours: int) -> List[dict]:
+    feed = await _get_feed_async(url)
+    articles: List[dict] = []
+    for entry in feed.entries:
+        entry_date_struct = entry.get("published_parsed") or entry.get("updated_parsed")
+        if _is_recent(entry_date_struct, hours):
+            link = entry.get("link", "")
+            text = await _get_article_text_async(link)
+            pub_date = (
+                datetime(*entry_date_struct[:6], tzinfo=timezone.utc).astimezone()
+                if entry_date_struct
+                else None
+            )
+            articles.append(
+                {
+                    "source": source,
+                    "date": pub_date.strftime("%Y-%m-%d %H:%M") if pub_date else "",
+                    "title": entry.get("title", ""),
+                    "link": link,
+                    "text": text,
+                }
+            )
+    return articles
+
+
 def collect_ticker_news(ticker: str) -> List[dict]:
     """Collect all articles containing the given ticker from all RSS feeds."""
     ticker_up = ticker.upper()
@@ -169,6 +231,39 @@ def collect_ticker_news(ticker: str) -> List[dict]:
                     }
                 )
     return collected
+
+
+async def collect_ticker_news_async(ticker: str) -> List[dict]:
+    """Asynchronous version of collect_ticker_news using threads."""
+    ticker_up = ticker.upper()
+    tasks = [
+        asyncio.create_task(_collect_ticker_from_feed_async(ticker_up, source, url))
+        for source, url in RSS_FEEDS.items()
+    ]
+    results = await asyncio.gather(*tasks)
+    collected: List[dict] = []
+    for articles in results:
+        collected.extend(articles)
+    return collected
+
+
+async def _collect_ticker_from_feed_async(ticker_up: str, source: str, url: str) -> List[dict]:
+    feed = await _get_feed_async(url)
+    articles: List[dict] = []
+    for entry in feed.entries:
+        text_summary = f"{entry.get('title', '')} {entry.get('summary', '')}"
+        if ticker_up in text_summary.upper():
+            link = entry.get("link", "")
+            text = await _get_article_text_async(link)
+            articles.append(
+                {
+                    "source": source,
+                    "title": entry.get("title", ""),
+                    "link": link,
+                    "text": text,
+                }
+            )
+    return articles
 
 
 if __name__ == "__main__":
