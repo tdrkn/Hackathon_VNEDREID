@@ -8,7 +8,8 @@ from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
+from dotenv import load_dotenv
+load_dotenv()
 from .rss_collector import RSS_FEEDS
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
