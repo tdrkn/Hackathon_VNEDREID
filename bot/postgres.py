@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from typing import List, Dict
 import asyncpg
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost/news")
@@ -18,6 +19,20 @@ async def ensure_schema(pool):
                 link TEXT UNIQUE,
                 body TEXT,
                 published_at TIMESTAMPTZ
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio (
+                user_id BIGINT,
+                figi TEXT,
+                ticker TEXT,
+                name TEXT,
+                qty DOUBLE PRECISION,
+                currency TEXT,
+                price DOUBLE PRECISION,
+                value DOUBLE PRECISION
             )
             """
         )
@@ -76,5 +91,53 @@ async def fetch_by_ticker(pool, ticker, limit=50):
             """,
             pattern,
             limit,
+        )
+        return [dict(r) for r in rows]
+
+
+async def replace_portfolio(pool, user_id: int, rows: List[Dict]):
+    """Replace portfolio entries for a user."""
+    if not rows:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM portfolio WHERE user_id=$1", user_id)
+        return 0
+
+    records = [
+        (
+            user_id,
+            r.get("figi"),
+            r.get("ticker"),
+            r.get("name"),
+            r.get("qty"),
+            r.get("currency"),
+            r.get("price"),
+            r.get("value"),
+        )
+        for r in rows
+    ]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM portfolio WHERE user_id=$1", user_id)
+            await conn.executemany(
+                """
+                INSERT INTO portfolio(user_id, figi, ticker, name, qty, currency, price, value)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                """,
+                records,
+            )
+    return len(records)
+
+
+async def fetch_portfolio(pool, user_id: int) -> List[Dict]:
+    """Return portfolio rows for a user."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT figi, ticker, name, qty, currency, price, value
+            FROM portfolio
+            WHERE user_id=$1
+            ORDER BY name
+            """,
+            user_id,
         )
         return [dict(r) for r in rows]

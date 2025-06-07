@@ -128,6 +128,7 @@ def main() -> None:
         print("Нет счетов.")
         return
 
+
     acc_id = args.account or accounts[0].id
 
     with Client(token=token) as cli:
