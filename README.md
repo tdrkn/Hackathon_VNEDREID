@@ -41,3 +41,11 @@
 
 После запуска бот начнёт опрашивать Telegram и реагировать на команды пользователей.
 
+Все собранные новости сохраняются в два CSV-файла:
+`articles.csv` содержит исходные данные, а `news.csv` совместим
+с таблицей `news` в PostgreSQL. Его можно загрузить так:
+
+```bash
+psql -d mydb -c "\COPY news(title,body,published_at,source,news_type,region,topics,related_markets,macro_sensitive,likely_to_influence,influence_reason) FROM 'news.csv' CSV HEADER"
+```
+

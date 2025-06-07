@@ -12,7 +12,7 @@ load_dotenv()
 
 from .rss_collector import collect_ticker_news, collect_recent_news
 
-from .storage import save_articles_to_csv
+from .storage import save_articles_to_csv, save_news_to_csv
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 
@@ -111,6 +111,7 @@ def get_news_digest(ticker: str, limit: int = 3) -> str:
         return 'Статьи не найдены.'
 
     save_articles_to_csv(articles_data)
+    save_news_to_csv(articles_data)
 
     digest_parts = []
     for art in articles_data[:limit]:
@@ -203,6 +204,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     save_articles_to_csv(articles)
+    save_news_to_csv(articles)
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
