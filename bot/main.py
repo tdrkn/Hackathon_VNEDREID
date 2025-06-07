@@ -21,7 +21,7 @@ from .postgres import (
 )
 from .rss_collector import collect_recent_news_async
 
-from .storage import save_articles_to_csv_async
+from .storage import save_articles_to_csv_async, CSV_PATH
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -103,21 +103,6 @@ async def pg_shutdown(app) -> None:
         await PG_POOL.close()
 
 
-async def pg_startup(app) -> None:
-    global PG_POOL
-    try:
-        PG_POOL = await init_pg_pool()
-        await ensure_schema(PG_POOL)
-    except Exception as e:
-        logging.error("PostgreSQL unavailable: %s", e)
-        PG_POOL = None
-
-
-async def pg_shutdown(app) -> None:
-    if PG_POOL:
-        await PG_POOL.close()
-
-
 def summarize_text(text: str, sentences: int = 3) -> str:
     parser = PlaintextParser.from_string(text, Tokenizer('english'))
     summarizer = LsaSummarizer()
@@ -170,7 +155,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /log, /rank, /help'
 
     )
 
@@ -184,6 +169,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
+        '/csv - скачать текущий CSV файл со статьями\n'
         '/log - показать последние строки лога\n'
         '/help - показать эту справку'
 
@@ -259,7 +245,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Новостей нет.')
         return
       
-    await save_articles_to_csv_async(articles, 'articles.csv')
+    await save_articles_to_csv_async(articles)
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
@@ -275,12 +261,27 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text('Файл лога не найден.')
 
+
+async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send current news CSV file to the user."""
+    if os.path.exists(CSV_PATH):
+        with open(CSV_PATH, 'rb') as f:
+            await update.message.reply_document(f, filename='articles.csv')
+    else:
+        await update.message.reply_text('Файл articles.csv не найден.')
+
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
         raise RuntimeError('TELEGRAM_TOKEN not set')
 
     asyncio.run(init_db())
+
+    # Ensure event loop exists for python-telegram-bot
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     app = (
         ApplicationBuilder()
@@ -298,6 +299,7 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
+    app.add_handler(CommandHandler('csv', send_csv))
     app.add_handler(CommandHandler('log', show_log))
 
 
