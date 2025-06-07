@@ -34,7 +34,26 @@ def add_subscription(user_id: int, ticker: str):
         (user_id, ticker.upper()),
     )
     conn.commit()
+    c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
+    rows = c.fetchall()
     conn.close()
+    return [row[0] for row in rows]
+
+
+def remove_subscription(user_id: int, ticker: str) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
+        (user_id, ticker.upper()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_subscriptions(user_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
     c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
     rows = c.fetchall()
     conn.close()
