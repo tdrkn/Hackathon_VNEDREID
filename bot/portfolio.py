@@ -1,4 +1,21 @@
-"""Utility script to print a user's portfolio with a heuristic risk column."""
+
+"""Tinkoff Invest — портфель с «умным» столбцом Risk
+===================================================
+
+* **risk_level** реально заполняется брокером далеко не у всех бумаг.  Если
+  сервер вернул *UNSPECIFIED* (код 0), скрипт проставляет риск **эвристикой**:
+
+  | instrument_type | fallback Risk |
+  |-----------------|---------------|
+  | currency        | LOW           |
+  | bond            | LOW           |
+  | etf             | MODERATE      |
+  | share           | MODERATE      |
+  | sp / future     | HIGH          |
+  | другое          | MODERATE      |
+
+* Настройте словарь ``DEFAULT_RISK_BY_TYPE`` если нужна своя логика.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +25,16 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
-from tinkoff.invest import Client, InstrumentIdType
-from tinkoff.invest.exceptions import UnauthenticatedError
-from tinkoff.invest.schemas import Quotation
-from tinkoff.invest.services import InstrumentsService
+
+try:
+    from tinkoff.invest import Client, InstrumentIdType  # type: ignore
+    from tinkoff.invest.exceptions import UnauthenticatedError  # type: ignore
+    from tinkoff.invest.services import InstrumentsService  # type: ignore
+    from tinkoff.invest.schemas import Quotation  # type: ignore
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    sys.stderr.write("[FATAL] pip install tinkoff-investments \u2013 \u043f\u0430\u043a\u0435\u0442 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.\n")
+    raise SystemExit(1) from exc
+
 
 _RISK_STR = {0: "-", 1: "HIGH", 2: "MODERATE", 3: "LOW", 4: "MINIMAL"}
 
@@ -25,8 +48,8 @@ DEFAULT_RISK_BY_TYPE = {
 }
 
 
-TOKEN_ENV = "INVEST_TOKEN"
-ACCOUNT_ENV = "INVEST_ACCOUNT_ID"
+
+TOKEN_ENV = "TINKOFF_INVEST_TOKEN"
 
 
 def q_to_float(q: Quotation) -> float:
@@ -106,7 +129,8 @@ def main() -> None:
         print("Нет счетов.")
         return
 
-    acc_id = args.account or os.getenv(ACCOUNT_ENV) or accounts[0].id
+
+    acc_id = args.account or accounts[0].id
 
     with Client(token=token) as cli:
         positions = cli.operations.get_portfolio(account_id=acc_id).positions
