@@ -9,6 +9,8 @@ from sumy.summarizers.lsa import LsaSummarizer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+from .rss_collector import RSS_FEEDS
+
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 
 logging.basicConfig(level=logging.INFO)
@@ -74,22 +76,30 @@ def summarize_text(text: str, sentences: int = 3) -> str:
 
 
 def get_news_digest(ticker: str, limit: int = 3) -> str:
-    feed_url = f'https://news.google.com/rss/search?q={ticker}'
-    feed = feedparser.parse(feed_url)
+    ticker_up = ticker.upper()
     articles = []
-    for entry in feed.entries[:limit]:
-        url = entry.link
-        try:
-            article = Article(url)
-            article.download()
-            article.parse()
-            summary = summarize_text(article.text)
-            articles.append(f"*{entry.title}*\n{summary}\n{url}")
-        except Exception as e:
-            logging.error('Failed to process article %s: %s', url, e)
-            articles.append(f"{entry.title}\n{url}")
-    if not articles:
 
+    for source, url in RSS_FEEDS.items():
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            text = f"{entry.get('title', '')} {entry.get('summary', '')}"
+            if ticker_up in text.upper():
+                link = entry.get('link')
+                try:
+                    article = Article(link)
+                    article.download()
+                    article.parse()
+                    summary = summarize_text(article.text)
+                    articles.append(f"*{entry.title}*\n{summary}\n{link}")
+                except Exception as e:
+                    logging.error('Failed to process article %s: %s', link, e)
+                    articles.append(f"{entry.title}\n{link}")
+            if len(articles) >= limit:
+                break
+        if len(articles) >= limit:
+            break
+
+    if not articles:
         return 'Статьи не найдены.'
 
     return '\n\n'.join(articles)
