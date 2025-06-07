@@ -7,5 +7,6 @@ lxml_html_clean
 pandas
 asyncpg
 aiosqlite
+tinkoff-investments
 
 tinkoff-investments>=0.2.0b113

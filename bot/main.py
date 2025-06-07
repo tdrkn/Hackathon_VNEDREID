@@ -2,6 +2,8 @@ import os
 import logging
 
 import aiosqlite
+import pandas as pd
+import io
 
 
 from sumy.parsers.plaintext import PlaintextParser
@@ -9,7 +11,13 @@ from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
 import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
@@ -18,11 +26,13 @@ from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
     fetch_by_ticker,
+    replace_portfolio,
+    fetch_portfolio,
 )
 from .rss_collector import collect_recent_news_async
-
 from .storage import save_articles_to_csv_async
 from .portfolio import load_portfolio, TOKEN_ENV
+
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -31,6 +41,7 @@ LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
 # Thread pool for future blocking tasks
 THREAD_POOL = ThreadPoolExecutor(max_workers=int(os.getenv('WORKERS', '8')))
 PG_POOL = None
+WAITING_TOKEN = set()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +58,9 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute(
             'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
+        )
+        await conn.execute(
+            'CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)'
         )
         await conn.commit()
 
@@ -87,21 +101,6 @@ async def get_rankings():
         ) as cur:
             rows = await cur.fetchall()
     return rows
-
-
-async def pg_startup(app) -> None:
-    global PG_POOL
-    try:
-        PG_POOL = await init_pg_pool()
-        await ensure_schema(PG_POOL)
-    except Exception as e:
-        logging.error("PostgreSQL unavailable: %s", e)
-        PG_POOL = None
-
-
-async def pg_shutdown(app) -> None:
-    if PG_POOL:
-        await PG_POOL.close()
 
 
 async def pg_startup(app) -> None:
@@ -173,6 +172,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /portfolio, /getrisk, /help'
 
+
     )
 
 
@@ -185,11 +185,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
+        '/csv - скачать текущий CSV файл со статьями\n'
+        '/csvbag - скачать ваш портфель в CSV\n'
         '/log - показать последние строки лога\n'
         '/portfolio - показать портфель\n'
         '/getrisk - вывести список тикер - риск\n'
-        '/help - показать эту справку'
 
+        '/help - показать эту справку'
     )
 
 
@@ -253,6 +255,44 @@ async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.info("Rank command used by %s", update.effective_user.id)
 
 
+async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user portfolio using stored token or ask for it."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if token:
+        await update.message.reply_text('Получаю портфель, пожалуйста подождите...')
+        text = await get_portfolio_text(token)
+        rows = await get_portfolio_data(token)
+        if PG_POOL:
+            try:
+                await replace_portfolio(PG_POOL, user_id, rows)
+            except Exception as e:
+                logging.error('Failed to save portfolio: %s', e)
+        await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+        return
+
+    WAITING_TOKEN.add(user_id)
+    await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+
+
+async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if user_id not in WAITING_TOKEN:
+        return
+    token = update.message.text.strip()
+    await save_token(user_id, token)
+    WAITING_TOKEN.discard(user_id)
+    await update.message.reply_text('Токен сохранён. Получаю портфель...')
+    text = await get_portfolio_text(token)
+    rows = await get_portfolio_data(token)
+    if PG_POOL:
+        try:
+            await replace_portfolio(PG_POOL, user_id, rows)
+        except Exception as e:
+            logging.error('Failed to save portfolio: %s', e)
+    await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+
+
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch recent news from RSS feeds and send the headlines."""
     hours = _parse_hours(context.args)
@@ -262,7 +302,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Новостей нет.')
         return
       
-    await save_articles_to_csv_async(articles, 'articles.csv')
+    await save_articles_to_csv_async(articles)
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
@@ -316,12 +356,46 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text('Файл лога не найден.')
 
+
+async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send current news CSV file to the user."""
+
+    if os.path.exists(CSV_PATH):
+        with open(CSV_PATH, 'rb') as f:
+            await update.message.reply_document(f, filename='articles.csv')
+    else:
+        await update.message.reply_text('Файл articles.csv не найден.')
+
+
+async def send_csvbag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send user's portfolio as CSV file."""
+    if PG_POOL is None:
+        await update.message.reply_text('База данных недоступна.')
+        return
+    user_id = update.effective_user.id
+    rows = await fetch_portfolio(PG_POOL, user_id)
+    if not rows:
+        await update.message.reply_text('Данных портфеля нет.')
+        return
+    df = pd.DataFrame(rows)
+    csv_bytes = df.to_csv(index=False).encode('utf-8')
+    buffer = io.BytesIO(csv_bytes)
+    buffer.name = 'portfolio.csv'
+    buffer.seek(0)
+    await update.message.reply_document(buffer, filename='portfolio.csv')
+
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
         raise RuntimeError('TELEGRAM_TOKEN not set')
 
     asyncio.run(init_db())
+
+    # Ensure event loop exists for python-telegram-bot
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     app = (
         ApplicationBuilder()
@@ -339,9 +413,13 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
+
     app.add_handler(CommandHandler('portfolio', portfolio_cmd))
     app.add_handler(CommandHandler('getrisk', getrisk))
+
     app.add_handler(CommandHandler('log', show_log))
+    app.add_handler(CommandHandler('mybag', mybag))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 
     app.run_polling()
