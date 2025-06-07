@@ -6,4 +6,5 @@ python-dotenv
 lxml_html_clean
 pandas
 asyncpg
+aiosqlite
 

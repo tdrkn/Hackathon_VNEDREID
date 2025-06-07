@@ -1,6 +1,8 @@
 import os
 import logging
-import sqlite3
+
+import aiosqlite
+
 
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
@@ -18,7 +20,9 @@ from .postgres import (
     fetch_by_ticker,
 )
 from .rss_collector import collect_recent_news_async
-from .storage import save_articles_to_csv
+
+from .storage import save_articles_to_csv_async
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -37,59 +41,66 @@ logging.basicConfig(
 )
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
-    )
-    conn.commit()
-    conn.close()
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
+        )
+        await conn.commit()
 
 
-def add_subscription(user_id: int, ticker: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-        (user_id, ticker.upper()),
-    )
-    conn.commit()
-    c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
-    rows = c.fetchall()
-    conn.close()
+async def add_subscription(user_id: int, ticker: str):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
+            (user_id, ticker.upper()),
+        )
+        await conn.commit()
+        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
+            rows = await cur.fetchall()
     return [row[0] for row in rows]
 
 
-def remove_subscription(user_id: int, ticker: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
-        (user_id, ticker.upper()),
-    )
-    conn.commit()
-    conn.close()
+
+async def remove_subscription(user_id: int, ticker: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
+            (user_id, ticker.upper()),
+        )
+        await conn.commit()
 
 
-def get_subscriptions(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
-    rows = c.fetchall()
-    conn.close()
+async def get_subscriptions(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
+            rows = await cur.fetchall()
     return [row[0] for row in rows]
 
 
-def get_rankings():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'
-    )
-    rows = c.fetchall()
-    conn.close()
+async def get_rankings():
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'
+        ) as cur:
+            rows = await cur.fetchall()
     return rows
+
+
+async def pg_startup(app) -> None:
+    global PG_POOL
+    try:
+        PG_POOL = await init_pg_pool()
+        await ensure_schema(PG_POOL)
+    except Exception as e:
+        logging.error("PostgreSQL unavailable: %s", e)
+        PG_POOL = None
+
+
+async def pg_shutdown(app) -> None:
+    if PG_POOL:
+        await PG_POOL.close()
 
 
 async def pg_startup(app) -> None:
@@ -136,9 +147,6 @@ def _parse_hours(args) -> int:
     except ValueError:
         return 24
 
-
-
-
 async def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker from Postgres database."""
     if PG_POOL is None:
@@ -150,7 +158,8 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
     digest_parts = []
     for art in articles_data[:limit]:
         text = art.get('body') or ''
-        summary = summarize_text(text) if text else ''
+
+        summary = await asyncio.to_thread(summarize_text, text) if text else ''
 
         digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
 
@@ -161,7 +170,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
 
     )
@@ -176,9 +184,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
-
         '/log - показать последние строки лога\n'
-
         '/help - показать эту справку'
 
     )
@@ -191,7 +197,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Использование: /subscribe <TICKER>')
         return
     ticker = context.args[0]
-    add_subscription(update.effective_user.id, ticker)
+    await add_subscription(update.effective_user.id, ticker)
     await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
     logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
 
@@ -203,14 +209,14 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text('Использование: /unsubscribe <TICKER>')
         return
     ticker = context.args[0]
-    remove_subscription(update.effective_user.id, ticker)
+    await remove_subscription(update.effective_user.id, ticker)
     await update.message.reply_text(f'Вы отписались от {ticker.upper()}')
     logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
 
 
 
 async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    tickers = get_subscriptions(update.effective_user.id)
+    tickers = await get_subscriptions(update.effective_user.id)
     if not tickers:
 
         await update.message.reply_text('У вас нет подписок.')
@@ -218,14 +224,22 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text('Собираю новости, пожалуйста подождите...')
     tasks = [asyncio.create_task(get_news_digest(t)) for t in tickers]
-    digests = await asyncio.gather(*tasks)
-    messages = [f'*{t}*\n{d}' for t, d in zip(tickers, digests)]
+
+    digests = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for t, d in zip(tickers, digests):
+        if isinstance(d, Exception):
+            msg = 'Ошибка получения новостей'
+        else:
+            msg = d
+        results.append(f'*{t}*\n{msg}')
+    messages = results
     await update.message.reply_text('\n\n'.join(messages), parse_mode='Markdown')
     logging.info("Digest sent to %s for %d tickers", update.effective_user.id, len(tickers))
 
 
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    ranking = get_rankings()
+    ranking = await get_rankings()
     if not ranking:
 
         await update.message.reply_text('Подписок ещё нет.')
@@ -244,8 +258,8 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not articles:
         await update.message.reply_text('Новостей нет.')
         return
-
-    save_articles_to_csv(articles, 'articles.csv')
+      
+    await save_articles_to_csv_async(articles, 'articles.csv')
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
@@ -261,28 +275,12 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text('Файл лога не найден.')
 
-
-async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send recent news from all RSS feeds for the given period."""
-    hours = _parse_hours(context.args)
-    articles = collect_recent_news(hours)
-    if not articles:
-        await update.message.reply_text('Новостей нет.')
-        return
-
-    save_articles_to_csv(articles)
-    save_news_to_csv(articles)
-
-    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
-    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
-
-
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
         raise RuntimeError('TELEGRAM_TOKEN not set')
 
-    init_db()
+    asyncio.run(init_db())
 
     app = (
         ApplicationBuilder()
@@ -300,7 +298,6 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
-
     app.add_handler(CommandHandler('log', show_log))
 
 
