@@ -10,6 +10,19 @@ This repository contains a simple Telegram bot that allows users to subscribe to
 
 Subscriptions are stored in a SQLite database for persistence.
 
+## Collecting Daily RSS News
+
+The repository also includes a helper script that gathers Russian finance and
+economy news from several RSS feeds. Run it to save today's news into a CSV
+file:
+
+```bash
+python -m bot.rss_collector
+```
+
+The script will create (or update) a file named `news_YYYY-MM-DD.csv` with
+today's headlines and links.
+
 ## Running with Docker
 
 1. Copy `.env.example` to `.env` and fill in your Telegram bot token.
