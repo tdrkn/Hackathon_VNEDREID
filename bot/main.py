@@ -30,14 +30,9 @@ from .postgres import (
     fetch_portfolio,
 )
 from .rss_collector import collect_recent_news_async
+from .storage import save_articles_to_csv_async
+from .portfolio import load_portfolio, TOKEN_ENV
 
-from .storage import save_articles_to_csv_async, CSV_PATH
-from .mybag import (
-    get_portfolio_text,
-    get_portfolio_data,
-    load_token,
-    save_token,
-)
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -175,7 +170,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /portfolio, /getrisk, /help'
+
 
     )
 
@@ -192,7 +188,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/csv - скачать текущий CSV файл со статьями\n'
         '/csvbag - скачать ваш портфель в CSV\n'
         '/log - показать последние строки лога\n'
-        '/mybag - показать портфель Тинькофф Инвест\n'
+        '/portfolio - показать портфель\n'
+        '/getrisk - вывести список тикер - риск\n'
+
         '/help - показать эту справку'
     )
 
@@ -311,6 +309,44 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.info("News command used by %s, %d articles", update.effective_user.id, len(articles))
 
 
+async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's portfolio with risk column."""
+    token = os.getenv(TOKEN_ENV)
+    if not token:
+        await update.message.reply_text('TINKOFF_INVEST_TOKEN not set')
+        return
+
+    try:
+        acc_id, rows = await asyncio.to_thread(load_portfolio, token, None)
+    except Exception as exc:
+        await update.message.reply_text(f'Ошибка: {exc}')
+        return
+
+    header = f"{'Ticker':<8} {'Qty':>10} {'Curr':<6} {'Price':>10} {'Value':>10} {'Risk':<8}"
+    lines = [header, '-' * len(header)]
+    for _, ticker, _name, qty, curr, price, value, risk in rows:
+        lines.append(f"{ticker:<8} {qty:10,.3f} {curr:<6} {price:10.2f} {value:10.2f} {risk:<8}")
+
+    await update.message.reply_text('<pre>' + '\n'.join(lines) + '</pre>', parse_mode='HTML')
+
+
+async def getrisk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send ticker-risk pairs from portfolio."""
+    token = os.getenv(TOKEN_ENV)
+    if not token:
+        await update.message.reply_text('TINKOFF_INVEST_TOKEN not set')
+        return
+
+    try:
+        _, rows = await asyncio.to_thread(load_portfolio, token, None)
+    except Exception as exc:
+        await update.message.reply_text(f'Ошибка: {exc}')
+        return
+
+    pairs = [f"{ticker} - {risk}" for _figi, ticker, _name, _qty, _curr, _price, _value, risk in rows]
+    await update.message.reply_text('\n'.join(pairs))
+
+
 async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send last 20 lines of the log file."""
     if os.path.exists(LOG_PATH):
@@ -377,8 +413,10 @@ def main():
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
-    app.add_handler(CommandHandler('csv', send_csv))
-    app.add_handler(CommandHandler('csvbag', send_csvbag))
+
+    app.add_handler(CommandHandler('portfolio', portfolio_cmd))
+    app.add_handler(CommandHandler('getrisk', getrisk))
+
     app.add_handler(CommandHandler('log', show_log))
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
