@@ -36,7 +36,7 @@ def add_subscription(user_id: int, ticker: str):
     conn.commit()
     conn.close()
 
-@@ -52,66 +54,74 @@ def get_subscriptions(user_id: int):
+def get_subscriptions(user_id: int):
     c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
     rows = c.fetchall()
     conn.close()
