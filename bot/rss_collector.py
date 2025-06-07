@@ -4,6 +4,9 @@ from typing import List, Dict
 
 import feedparser
 import pandas as pd
+from newspaper import Article
+
+from .storage import save_articles_to_csv, save_articles_to_db
 
 RSS_FEEDS: Dict[str, str] = {
     "\u0420\u0411\u041A \u0413\u043b\u0430\u0432\u043d\u044b\u0435 \u043d\u043e\u0432\u043e\u0441\u0442\u0438": "https://static.feed.rbc.ru/rbc/internal/rss.rbc.ru/rbc.ru/mainnews.rss",
@@ -29,7 +32,7 @@ def _is_today(entry_date_struct) -> bool:
 
 
 def collect_today_news() -> pd.DataFrame:
-    """Collect news from RSS feeds published today."""
+    """Collect news from RSS feeds published today with article texts."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     collected: List[dict] = []
 
@@ -38,12 +41,23 @@ def collect_today_news() -> pd.DataFrame:
         for entry in feed.entries:
             entry_date_struct = entry.get("published_parsed") or entry.get("updated_parsed")
             if _is_today(entry_date_struct):
+                link = entry.get("link", "")
+                text = ""
+                if link:
+                    try:
+                        article = Article(link)
+                        article.download()
+                        article.parse()
+                        text = article.text
+                    except Exception:
+                        text = ""
                 collected.append(
                     {
                         "\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a": source,
                         "\u0414\u0430\u0442\u0430": today_str,
                         "\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a": entry.get("title", "\u0411\u0435\u0437 \u0437\u0430\u0433\u043e\u043b\u043e\u0432\u043a\u0430"),
-                        "\u0421\u0441\u044b\u043b\u043a\u0430": entry.get("link", ""),
+                        "\u0421\u0441\u044b\u043b\u043a\u0430": link,
+                        "\u0422\u0435\u043a\u0441\u0442": text,
                     }
                 )
 
@@ -59,16 +73,39 @@ def save_today_news(directory: str = ".") -> str:
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     path = os.path.join(directory, f"news_{today_str}.csv")
-    if os.path.exists(path):
-        old_df = pd.read_csv(path)
-        df = (
-            pd.concat([old_df, df])
-            .drop_duplicates(subset=["\u0417\u0430\u0433\u043e\u043b\u043e\u0432\u043e\u043a", "\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a"])
-            .reset_index(drop=True)
-        )
-    df.to_csv(path, index=False)
+    save_articles_to_csv(df.to_dict(orient="records"), path)
     print(f"[\u2714] \u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e {len(df)} \u043d\u043e\u0432\u043e\u0441\u0442\u0435\u0439 \u0432 {path}")
     return path
+
+
+def collect_ticker_news(ticker: str) -> List[dict]:
+    """Collect all articles containing the given ticker from all RSS feeds."""
+    ticker_up = ticker.upper()
+    collected: List[dict] = []
+    for source, url in RSS_FEEDS.items():
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            text_summary = f"{entry.get('title', '')} {entry.get('summary', '')}"
+            if ticker_up in text_summary.upper():
+                link = entry.get("link", "")
+                text = ""
+                if link:
+                    try:
+                        article = Article(link)
+                        article.download()
+                        article.parse()
+                        text = article.text
+                    except Exception:
+                        text = ""
+                collected.append(
+                    {
+                        "source": source,
+                        "title": entry.get("title", ""),
+                        "link": link,
+                        "text": text,
+                    }
+                )
+    return collected
 
 
 if __name__ == "__main__":

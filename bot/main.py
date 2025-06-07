@@ -1,8 +1,7 @@
 import os
 import logging
 import sqlite3
-import feedparser
-from newspaper import Article
+
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
@@ -10,7 +9,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 load_dotenv()
-from .rss_collector import RSS_FEEDS
+from .rss_collector import collect_ticker_news
+from .storage import save_articles_to_csv
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 
@@ -80,32 +80,22 @@ def summarize_text(text: str, sentences: int = 3) -> str:
 
 
 def get_news_digest(ticker: str, limit: int = 3) -> str:
-    ticker_up = ticker.upper()
-    articles = []
-    for source, url in RSS_FEEDS.items():
-        feed = feedparser.parse(url)
-        for entry in feed.entries:
-            text = f"{entry.get('title', '')} {entry.get('summary', '')}"
-            if ticker_up in text.upper():
-                link = entry.get('link')
-                try:
-                    article = Article(link)
-                    article.download()
-                    article.parse()
-                    summary = summarize_text(article.text)
-                    articles.append(f"*{entry.title}*\n{summary}\n{link}")
-                except Exception as e:
-                    logging.error('Failed to process article %s: %s', link, e)
-                    articles.append(f"{entry.title}\n{link}")
-            if len(articles) >= limit:
-                break
-        if len(articles) >= limit:
-            break
-
-    if not articles:
+    """Return news digest for ticker and save found articles to CSV."""
+    articles_data = collect_ticker_news(ticker)
+    if not articles_data:
         return 'Статьи не найдены.'
 
-    return '\n\n'.join(articles)
+    save_articles_to_csv(articles_data)
+
+    digest_parts = []
+    for art in articles_data[:limit]:
+        if art.get('text'):
+            summary = summarize_text(art['text'])
+        else:
+            summary = ''
+        digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
+
+    return '\n\n'.join(digest_parts)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
