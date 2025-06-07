@@ -10,8 +10,10 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 load_dotenv()
+
 from .rss_collector import collect_ticker_news, collect_recent_news
 from .storage import save_articles_to_csv, save_articles_to_db
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -88,6 +90,7 @@ def summarize_text(text: str, sentences: int = 3) -> str:
     return ' '.join(str(sentence) for sentence in summary)
 
 
+
 def _parse_hours(args) -> int:
     """Parse time interval arguments and return hours."""
     if not args:
@@ -111,6 +114,7 @@ def _parse_hours(args) -> int:
         return 24
 
 
+
 def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker and save found articles to CSV."""
     articles_data = collect_ticker_news(ticker)
@@ -118,7 +122,9 @@ def get_news_digest(ticker: str, limit: int = 3) -> str:
         return 'Статьи не найдены.'
 
     save_articles_to_csv(articles_data)
+
     save_articles_to_db(articles_data)
+
 
     digest_parts = []
     for art in articles_data[:limit]:
@@ -135,7 +141,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
+
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /log, /rank, /help'
+
 
     )
 
@@ -149,7 +157,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
+
         '/log - показать последние строки лога\n'
+
         '/help - показать эту справку'
 
     )
@@ -236,6 +246,20 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Файл лога не найден.')
 
 
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send recent news from all RSS feeds for the given period."""
+    hours = _parse_hours(context.args)
+    articles = collect_recent_news(hours)
+    if not articles:
+        await update.message.reply_text('Новостей нет.')
+        return
+
+    save_articles_to_csv(articles)
+
+    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
+    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
+
+
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
     if not token:
@@ -253,6 +277,7 @@ def main():
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('log', show_log))
+
 
     app.run_polling()
 
