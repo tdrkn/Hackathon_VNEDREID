@@ -3,9 +3,7 @@ import sqlite3
 import asyncio
 import pandas as pd
 
-CSV_PATH = os.path.join(os.path.dirname(__file__), "articles.csv")
-
-def save_articles_to_csv(articles, path=CSV_PATH):
+def save_articles_to_csv(articles, path="articles.csv"):
     """Append articles to CSV file, avoiding duplicates."""
     if not articles:
         return
@@ -20,7 +18,7 @@ def save_articles_to_csv(articles, path=CSV_PATH):
     df.to_csv(path, index=False)
     return path
 
-async def save_articles_to_csv_async(articles, path=CSV_PATH):
+async def save_articles_to_csv_async(articles, path="articles.csv"):
     return await asyncio.to_thread(save_articles_to_csv, articles, path)
 def save_articles_to_db(articles, db_path="articles.db"):
     """Save articles to a SQLite database. Each link is stored once."""

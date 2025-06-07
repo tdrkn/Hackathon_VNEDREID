@@ -1,0 +1,57 @@
+Index: bot/main.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import os\nimport logging\nimport sqlite3\nimport feedparser\nfrom newspaper import Article\nfrom sumy.parsers.plaintext import PlaintextParser\nfrom sumy.nlp.tokenizers import Tokenizer\nfrom sumy.summarizers.lsa import LsaSummarizer\nfrom telegram import Update\nfrom telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes\n\nDB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')\n\nlogging.basicConfig(level=logging.INFO)\n\n\ndef init_db():\n    conn = sqlite3.connect(DB_PATH)\n    c = conn.cursor()\n    c.execute(\n        'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'\n    )\n    conn.commit()\n    conn.close()\n\n\ndef add_subscription(user_id: int, ticker: str):\n    conn = sqlite3.connect(DB_PATH)\n    c = conn.cursor()\n    c.execute(\n        'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',\n        (user_id, ticker.upper()),\n    )\n    conn.commit()\n    conn.close()\n\n\ndef remove_subscription(user_id: int, ticker: str):\n    conn = sqlite3.connect(DB_PATH)\n    c = conn.cursor()\n    c.execute(\n        'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',\n        (user_id, ticker.upper()),\n    )\n    conn.commit()\n    conn.close()\n\n\ndef get_subscriptions(user_id: int):\n    conn = sqlite3.connect(DB_PATH)\n    c = conn.cursor()\n    c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))\n    rows = c.fetchall()\n    conn.close()\n    return [row[0] for row in rows]\n\n\ndef get_rankings():\n    conn = sqlite3.connect(DB_PATH)\n    c = conn.cursor()\n    c.execute(\n        'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'\n    )\n    rows = c.fetchall()\n    conn.close()\n    return rows\n\n\ndef summarize_text(text: str, sentences: int = 3) -> str:\n    parser = PlaintextParser.from_string(text, Tokenizer('english'))\n    summarizer = LsaSummarizer()\n    summary = summarizer(parser.document, sentences)\n    return ' '.join(str(sentence) for sentence in summary)\n\n\ndef get_news_digest(ticker: str, limit: int = 3) -> str:\n    feed_url = f'https://news.google.com/rss/search?q={ticker}'\n    feed = feedparser.parse(feed_url)\n    articles = []\n    for entry in feed.entries[:limit]:\n        url = entry.link\n        try:\n            article = Article(url)\n            article.download()\n            article.parse()\n            summary = summarize_text(article.text)\n            articles.append(f\"*{entry.title}*\\n{summary}\\n{url}\")\n        except Exception as e:\n            logging.error('Failed to process article %s: %s', url, e)\n            articles.append(f\"{entry.title}\\n{url}\")\n    if not articles:\n        return 'No articles found.'\n    return '\\n\\n'.join(articles)\n\n\nasync def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    await update.message.reply_text(\n        'Welcome! Use /subscribe <TICKER> to subscribe to news updates. '\n        'Commands: /subscribe, /unsubscribe, /digest, /rank, /help'\n    )\n\n\nasync def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    await update.message.reply_text(\n        '/start - Welcome message\\n'\n        '/subscribe <TICKER> - Subscribe to a ticker\\n'\n        '/unsubscribe <TICKER> - Unsubscribe from a ticker\\n'\n        '/digest - Get news digest for your subscriptions\\n'\n        '/rank - Show most subscribed tickers\\n'\n        '/help - Show this help message'\n    )\n\n\nasync def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    if not context.args:\n        await update.message.reply_text('Usage: /subscribe <TICKER>')\n        return\n    ticker = context.args[0]\n    add_subscription(update.effective_user.id, ticker)\n    await update.message.reply_text(f'Subscribed to {ticker.upper()}')\n\n\nasync def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    if not context.args:\n        await update.message.reply_text('Usage: /unsubscribe <TICKER>')\n        return\n    ticker = context.args[0]\n    remove_subscription(update.effective_user.id, ticker)\n    await update.message.reply_text(f'Unsubscribed from {ticker.upper()}')\n\n\nasync def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    tickers = get_subscriptions(update.effective_user.id)\n    if not tickers:\n        await update.message.reply_text('You have no subscriptions.')\n        return\n    messages = []\n    for t in tickers:\n        digest_text = get_news_digest(t)\n        messages.append(f'*{t}*\\n{digest_text}')\n    await update.message.reply_text('\\n\\n'.join(messages), parse_mode='Markdown')\n\n\nasync def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n    ranking = get_rankings()\n    if not ranking:\n        await update.message.reply_text('No subscriptions yet.')\n        return\n    lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]\n    await update.message.reply_text('\\n'.join(lines))\n\n\ndef main():\n    token = os.getenv('TELEGRAM_TOKEN')\n    if not token:\n        raise RuntimeError('TELEGRAM_TOKEN not set')\n\n    init_db()\n\n    app = ApplicationBuilder().token(token).build()\n\n    app.add_handler(CommandHandler('start', start))\n    app.add_handler(CommandHandler('help', help_command))\n    app.add_handler(CommandHandler('subscribe', subscribe))\n    app.add_handler(CommandHandler('unsubscribe', unsubscribe))\n    app.add_handler(CommandHandler('digest', digest))\n    app.add_handler(CommandHandler('rank', rank))\n\n    app.run_polling()\n\n\nif __name__ == '__main__':\n    main()\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/bot/main.py b/bot/main.py
+--- a/bot/main.py	(revision 3cb30514d02d2eb19a74adc87752dcc313b2494d)
++++ b/bot/main.py	(date 1749298849863)
+@@ -8,7 +8,9 @@
+ from sumy.summarizers.lsa import LsaSummarizer
+ from telegram import Update
+ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
++from dotenv import load_dotenv
+ 
++load_dotenv()
+ DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
+ 
+ logging.basicConfig(level=logging.INFO)
+Index: .env.example
+===================================================================
+diff --git a/.env.example b/.env.example
+deleted file mode 100644
+--- a/.env.example	(revision 3cb30514d02d2eb19a74adc87752dcc313b2494d)
++++ /dev/null	(revision 3cb30514d02d2eb19a74adc87752dcc313b2494d)
+@@ -1,1 +0,0 @@
+-TELEGRAM_TOKEN=your-telegram-token-here
+Index: .env
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.env b/.env
+new file mode 100644
+--- /dev/null	(date 1749298732079)
++++ b/.env	(date 1749298732079)
+@@ -0,0 +1,1 @@
++TELEGRAM_TOKEN='7871464171:AAFK4YxqZ-UPLiDcc_T9wLF1kY7hvhidmEA'
+Index: .idea/.gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/.gitignore b/.idea/.gitignore
+new file mode 100644
+--- /dev/null	(date 1749297435013)
++++ b/.idea/.gitignore	(date 1749297435013)
+@@ -0,0 +1,8 @@
++# Default ignored files
++/shelf/
++/workspace.xml
++# Editor-based HTTP Client requests
++/httpRequests/
++# Datasource local storage ignored files
++/dataSources/
++/dataSources.local.xml

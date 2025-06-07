@@ -138,7 +138,6 @@ def load_portfolio(token: str, account_id: Optional[str] | None = None):
     return acc_id, rows
 
 
-
 def main() -> None:
     parser = argparse.ArgumentParser("Show portfolio with heuristic risk level")
     parser.add_argument("--token", required=False)
@@ -148,7 +147,6 @@ def main() -> None:
     token = pick_token(args.token)
 
     try:
-
         acc_id, rows = load_portfolio(token, args.account)
     except UnauthenticatedError:
         sys.stderr.write("[AUTH] Токен отклонён.\n")
@@ -171,7 +169,6 @@ def main() -> None:
         print(
             f"{figi:<12} {ticker:<8} {name:<30} {qty:10,.3f} {curr:<6} {price:14,.2f} {value:14,.2f} {risk:<8}"
         )
-
 
 
 if __name__ == "__main__":
