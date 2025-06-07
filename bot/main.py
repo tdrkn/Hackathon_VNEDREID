@@ -21,7 +21,7 @@ from .postgres import (
 )
 from .rss_collector import collect_recent_news_async
 
-from .storage import save_articles_to_csv_async
+from .storage import save_articles_to_csv_async, CSV_PATH
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -260,7 +260,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Новостей нет.')
         return
       
-    await save_articles_to_csv_async(articles, 'articles.csv')
+    await save_articles_to_csv_async(articles)
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
@@ -279,9 +279,10 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def send_csv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send current news CSV file to the user."""
-    path = 'articles.csv'
-    if os.path.exists(path):
-        with open(path, 'rb') as f:
+
+    if os.path.exists(CSV_PATH):
+        with open(CSV_PATH, 'rb') as f:
+
             await update.message.reply_document(f, filename='articles.csv')
     else:
         await update.message.reply_text('Файл articles.csv не найден.')
