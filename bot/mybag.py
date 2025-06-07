@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, Dict as TDict
 
 import aiosqlite
 from tinkoff.invest import Client, InstrumentIdType
@@ -80,18 +80,19 @@ def _make_resolver(instr):
     return resolve
 
 
-def _build_portfolio(token: str) -> str:
+def _collect_portfolio(token: str) -> Tuple[str, List[TDict]]:
     try:
         with Client(token=token, app_name="tinvest_portfolio") as cli:
             accounts = cli.users.get_accounts().accounts
     except UnauthenticatedError:
-        return "[AUTH ERROR] Токен отклонён."
+        return "[AUTH ERROR] Токен отклонён.", []
 
     if not accounts:
-        return "У этого токена нет брокерских счетов."
+        return "У этого токена нет брокерских счетов.", []
 
     account_id = accounts[0].id
 
+    rows: List[TDict] = []
     with Client(token=token, app_name="tinvest_portfolio") as cli:
         positions = cli.operations.get_portfolio(account_id=account_id).positions
         resolver = _make_resolver(cli.instruments)
@@ -101,7 +102,7 @@ def _build_portfolio(token: str) -> str:
 
         if not positions:
             lines.append("(Portfolio is empty)")
-            return "\n".join(lines)
+            return "\n".join(lines), rows
 
         header = (
             f"{'FIGI':<12} {'Ticker':<8} {'Name':<30} {'Qty':>10} "
@@ -121,10 +122,28 @@ def _build_portfolio(token: str) -> str:
             lines.append(
                 f"{figi:<12} {ticker:<8} {name:<30} {qty:10,.3f} {curr:<8} {price:14,.2f} {value:14,.2f}"
             )
+            rows.append(
+                {
+                    "figi": figi,
+                    "ticker": ticker,
+                    "name": name,
+                    "qty": float(qty),
+                    "currency": curr,
+                    "price": float(price),
+                    "value": float(value),
+                }
+            )
 
-        return "\n".join(lines)
+        return "\n".join(lines), rows
 
 
 async def get_portfolio_text(token: str) -> str:
     """Return portfolio table for given token."""
-    return await asyncio.to_thread(_build_portfolio, token)
+    text, _ = await asyncio.to_thread(_collect_portfolio, token)
+    return text
+
+
+async def get_portfolio_data(token: str) -> List[TDict]:
+    """Return portfolio rows for given token."""
+    _, rows = await asyncio.to_thread(_collect_portfolio, token)
+    return rows
