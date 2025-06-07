@@ -1,4 +1,3 @@
-
 """Tinkoff Invest — портфель с «умным» столбцом Risk
 ===================================================
 
@@ -25,7 +24,6 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
-
 try:
     from tinkoff.invest import Client, InstrumentIdType  # type: ignore
     from tinkoff.invest.exceptions import UnauthenticatedError  # type: ignore
@@ -34,7 +32,6 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
     sys.stderr.write("[FATAL] pip install tinkoff-investments \u2013 \u043f\u0430\u043a\u0435\u0442 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.\n")
     raise SystemExit(1) from exc
-
 
 _RISK_STR = {0: "-", 1: "HIGH", 2: "MODERATE", 3: "LOW", 4: "MINIMAL"}
 
@@ -46,7 +43,6 @@ DEFAULT_RISK_BY_TYPE = {
     "sp": "HIGH",
     "future": "HIGH",
 }
-
 
 
 TOKEN_ENV = "TINKOFF_INVEST_TOKEN"
@@ -69,12 +65,15 @@ def make_resolver(instr: InstrumentsService):
     cache: Dict[str, Tuple[str, str, str]] = {}
 
     def call_type_specific(itype: str, uid: str):
-        fn_name = f"get_{itype}_by"
-        fn = getattr(instr, fn_name, None)
+        """Try resolve instrument via <type>_by method when available."""
+        fn = getattr(instr, f"{itype}_by", None)
         if not callable(fn):
             return None
         try:
-            return fn(id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_UID, id=uid).instrument
+            return fn(
+                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_UID,
+                id=uid,
+            ).instrument
         except Exception:
             return None
 
