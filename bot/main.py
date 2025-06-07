@@ -89,50 +89,62 @@ def get_news_digest(ticker: str, limit: int = 3) -> str:
             logging.error('Failed to process article %s: %s', url, e)
             articles.append(f"{entry.title}\n{url}")
     if not articles:
-        return 'No articles found.'
+
+        return 'Статьи не найдены.'
+
     return '\n\n'.join(articles)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        'Welcome! Use /subscribe <TICKER> to subscribe to news updates. '
-        'Commands: /subscribe, /unsubscribe, /digest, /rank, /help'
+
+        'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /rank, /help'
+
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        '/start - Welcome message\n'
-        '/subscribe <TICKER> - Subscribe to a ticker\n'
-        '/unsubscribe <TICKER> - Unsubscribe from a ticker\n'
-        '/digest - Get news digest for your subscriptions\n'
-        '/rank - Show most subscribed tickers\n'
-        '/help - Show this help message'
+
+        '/start - приветственное сообщение\n'
+        '/subscribe <TICKER> - подписаться на тикер\n'
+        '/unsubscribe <TICKER> - отписаться от тикера\n'
+        '/digest - получить новостной дайджест по подпискам\n'
+        '/rank - показать самые популярные тикеры\n'
+        '/help - показать эту справку'
+
     )
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
-        await update.message.reply_text('Usage: /subscribe <TICKER>')
+
+        await update.message.reply_text('Использование: /subscribe <TICKER>')
         return
     ticker = context.args[0]
     add_subscription(update.effective_user.id, ticker)
-    await update.message.reply_text(f'Subscribed to {ticker.upper()}')
+    await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
+
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
-        await update.message.reply_text('Usage: /unsubscribe <TICKER>')
+
+        await update.message.reply_text('Использование: /unsubscribe <TICKER>')
         return
     ticker = context.args[0]
     remove_subscription(update.effective_user.id, ticker)
-    await update.message.reply_text(f'Unsubscribed from {ticker.upper()}')
+    await update.message.reply_text(f'Вы отписались от {ticker.upper()}')
+
 
 
 async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tickers = get_subscriptions(update.effective_user.id)
     if not tickers:
-        await update.message.reply_text('You have no subscriptions.')
+
+        await update.message.reply_text('У вас нет подписок.')
+
         return
     messages = []
     for t in tickers:
@@ -144,7 +156,9 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ranking = get_rankings()
     if not ranking:
-        await update.message.reply_text('No subscriptions yet.')
+
+        await update.message.reply_text('Подписок ещё нет.')
+
         return
     lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
     await update.message.reply_text('\n'.join(lines))

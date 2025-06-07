@@ -1,41 +1,43 @@
-# Telegram News Digest Bot
 
-This repository contains a simple Telegram bot that allows users to subscribe to stock tickers and receive news digests.
+# Телеграм-бот для новостных дайджестов
 
-## Features
-- `/start` and `/help` for instructions
-- `/subscribe <TICKER>` and `/unsubscribe <TICKER>` to manage subscriptions
-- `/digest` to fetch the latest news for subscribed tickers
-- `/rank` to show the most popular tickers
+Простой бот, который позволяет подписаться на тикеры акций и получать по ним краткий обзор новостей.
 
-Subscriptions are stored in a SQLite database for persistence.
+## Возможности
+- `/start` и `/help` — вывод подсказок
+- `/subscribe <TICKER>` и `/unsubscribe <TICKER>` — управление подписками
+- `/digest` — получение новостного дайджеста по подписанным тикерам
+- `/rank` — список самых популярных тикеров
 
-## Collecting Daily RSS News
+Подписки хранятся в базе данных SQLite, поэтому сохраняются между перезапусками.
 
-The repository also includes a helper script that gathers Russian finance and
-economy news from several RSS feeds. Run it to save today's news into a CSV
-file:
-
-```bash
-python -m bot.rss_collector
+## Структура проекта
+```
+.
+├── Dockerfile
+├── README.md
+├── bot/
+│   ├── __init__.py
+│   └── main.py
+├── requirements.txt
+└── .env.example
 ```
 
-The script will create (or update) a file named `news_YYYY-MM-DD.csv` with
-today's headlines and links.
-
-## Running with Docker
-
-1. Copy `.env.example` to `.env` and fill in your Telegram bot token.
+## Запуск в Docker
+1. Скопируйте `.env.example` в `.env` и укажите токен телеграм-бота.
    ```bash
    cp .env.example .env
    ```
-2. Build the image:
+2. Постройте образ:
    ```bash
    docker build -t telegram-digest-bot .
    ```
-3. Run the container:
+3. Запустите контейнер:
+
    ```bash
    docker run --env-file .env telegram-digest-bot
    ```
 
-The bot will start polling Telegram for updates.
+
+После запуска бот начнёт опрашивать Telegram и реагировать на команды пользователей.
+
