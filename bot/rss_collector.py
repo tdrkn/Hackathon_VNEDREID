@@ -8,6 +8,7 @@ from newspaper import Article
 
 from .storage import save_articles_to_csv, save_articles_to_db
 
+
 _FEED_CACHE: Dict[str, feedparser.FeedParserDict] = {}
 _ARTICLE_CACHE: Dict[str, str] = {}
 
@@ -34,6 +35,7 @@ def _get_article_text(url: str) -> str:
         text = ""
     _ARTICLE_CACHE[url] = text
     return text
+
 
 RSS_FEEDS: Dict[str, str] = {
     "\u0420\u0411\u041A \u0413\u043b\u0430\u0432\u043d\u044b\u0435 \u043d\u043e\u0432\u043e\u0441\u0442\u0438": "https://static.feed.rbc.ru/rbc/internal/rss.rbc.ru/rbc.ru/mainnews.rss",
@@ -85,7 +87,9 @@ def collect_today_news() -> pd.DataFrame:
             entry_date_struct = entry.get("published_parsed") or entry.get("updated_parsed")
             if _is_today(entry_date_struct):
                 link = entry.get("link", "")
+
                 text = _get_article_text(link)
+
                 collected.append(
                     {
                         "\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a": source,
@@ -111,6 +115,7 @@ def save_today_news(directory: str = ".") -> str:
     save_articles_to_csv(df.to_dict(orient="records"), path)
     print(f"[\u2714] \u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e {len(df)} \u043d\u043e\u0432\u043e\u0441\u0442\u0435\u0439 \u0432 {path}")
     return path
+
 
 
 def collect_recent_news(hours: int = 24) -> List[dict]:
@@ -145,12 +150,16 @@ def collect_ticker_news(ticker: str) -> List[dict]:
     ticker_up = ticker.upper()
     collected: List[dict] = []
     for source, url in RSS_FEEDS.items():
+
         feed = _get_feed(url)
+
         for entry in feed.entries:
             text_summary = f"{entry.get('title', '')} {entry.get('summary', '')}"
             if ticker_up in text_summary.upper():
                 link = entry.get("link", "")
+
                 text = _get_article_text(link)
+
                 collected.append(
                     {
                         "source": source,

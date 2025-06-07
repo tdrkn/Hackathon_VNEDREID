@@ -9,7 +9,9 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 load_dotenv()
+
 from .rss_collector import collect_ticker_news, collect_recent_news
+
 from .storage import save_articles_to_csv
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -79,6 +81,7 @@ def summarize_text(text: str, sentences: int = 3) -> str:
     return ' '.join(str(sentence) for sentence in summary)
 
 
+
 def _parse_hours(args) -> int:
     """Parse time interval arguments and return hours."""
     if not args:
@@ -100,7 +103,6 @@ def _parse_hours(args) -> int:
         return int(unit)
     except ValueError:
         return 24
-
 
 def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker and save found articles to CSV."""
