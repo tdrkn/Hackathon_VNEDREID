@@ -9,7 +9,12 @@ import feedparser
 import pandas as pd
 from newspaper import Article
 
-from .storage import save_articles_to_csv, save_articles_to_db
+from .storage import (
+    save_articles_to_csv,
+    save_articles_to_db,
+    save_articles_to_csv_async,
+    save_articles_to_db_async,
+)
 
 
 _FEED_CACHE: Dict[str, feedparser.FeedParserDict] = {}
@@ -106,6 +111,10 @@ def collect_today_news() -> pd.DataFrame:
         for entry in feed.entries:
             entry_date_struct = entry.get("published_parsed") or entry.get("updated_parsed")
             if _is_today(entry_date_struct):
+async def save_today_news_async(directory: str = ".") -> str:
+    return await asyncio.to_thread(save_today_news, directory)
+
+
                 link = entry.get("link", "")
 
                 text = _get_article_text(link)

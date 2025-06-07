@@ -1,10 +1,19 @@
 import os
 import sqlite3
+import asyncio
 import pandas as pd
 
 
 
 
+async def save_articles_to_csv_async(articles, path="articles.csv"):
+    return await asyncio.to_thread(save_articles_to_csv, articles, path)
+
+
+
+
+async def save_articles_to_db_async(articles, db_path="articles.db"):
+    return await asyncio.to_thread(save_articles_to_db, articles, db_path)
 def save_articles_to_csv(articles, path="articles.csv"):
     """Append articles to CSV file, avoiding duplicates."""
     if not articles:

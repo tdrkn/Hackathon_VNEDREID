@@ -1,6 +1,6 @@
 import os
 import logging
-import sqlite3
+import aiosqlite
 
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
@@ -11,50 +11,40 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
+from .storage import save_articles_to_csv_async
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
+        )
+        await conn.commit()
+async def add_subscription(user_id: int, ticker: str):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
+            (user_id, ticker.upper()),
+        )
+        await conn.commit()
+        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
+            rows = await cur.fetchall()
+async def remove_subscription(user_id: int, ticker: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
+            (user_id, ticker.upper()),
+        )
+        await conn.commit()
+async def get_subscriptions(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
+            rows = await cur.fetchall()
 
-from .postgres import (
-    init_pool as init_pg_pool,
-    ensure_schema,
-    fetch_by_ticker,
-)
-from .rss_collector import collect_recent_news_async
-from .storage import save_articles_to_csv
-
-DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
-LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
-
-# Thread pool for future blocking tasks
-THREAD_POOL = ThreadPoolExecutor(max_workers=int(os.getenv('WORKERS', '8')))
-PG_POOL = None
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding='utf-8'),
-        logging.StreamHandler(),
-    ],
-)
-
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
-    )
-    conn.commit()
-    conn.close()
-
-
-def add_subscription(user_id: int, ticker: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-        (user_id, ticker.upper()),
-    )
-    conn.commit()
+async def get_rankings():
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'
+        ) as cur:
+            rows = await cur.fetchall()
     c.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,))
     rows = c.fetchall()
     conn.close()
@@ -123,15 +113,22 @@ def _parse_hours(args) -> int:
     if len(args) > 1:
         try:
             qty = int(args[1])
-        except ValueError:
-            qty = 1
-    if unit.startswith('hour'):
-        return qty
-    if unit.startswith('day'):
-        return qty * 24
-    if unit.startswith('week'):
-        return qty * 24 * 7
-    try:
+        summary = await asyncio.to_thread(summarize_text, text) if text else ''
+    await add_subscription(update.effective_user.id, ticker)
+    await remove_subscription(update.effective_user.id, ticker)
+    tickers = await get_subscriptions(update.effective_user.id)
+    digests = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for t, d in zip(tickers, digests):
+        if isinstance(d, Exception):
+            msg = 'Ошибка получения новостей'
+        else:
+            msg = d
+        results.append(f'*{t}*\n{msg}')
+    messages = results
+    ranking = await get_rankings()
+    await save_articles_to_csv_async(articles, 'articles.csv')
+    asyncio.run(init_db())
         return int(unit)
     except ValueError:
         return 24
