@@ -1,6 +1,8 @@
 import os
 import logging
+
 import aiosqlite
+
 
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
@@ -11,13 +13,16 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 load_dotenv()
+
 from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
     fetch_by_ticker,
 )
 from .rss_collector import collect_recent_news_async
+
 from .storage import save_articles_to_csv_async
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -34,6 +39,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
+
 
 
 async def init_db():
@@ -54,6 +60,7 @@ async def add_subscription(user_id: int, ticker: str):
         async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
             rows = await cur.fetchall()
     return [row[0] for row in rows]
+
 
 
 async def remove_subscription(user_id: int, ticker: str) -> None:
@@ -79,6 +86,21 @@ async def get_rankings():
         ) as cur:
             rows = await cur.fetchall()
     return rows
+
+
+async def pg_startup(app) -> None:
+    global PG_POOL
+    try:
+        PG_POOL = await init_pg_pool()
+        await ensure_schema(PG_POOL)
+    except Exception as e:
+        logging.error("PostgreSQL unavailable: %s", e)
+        PG_POOL = None
+
+
+async def pg_shutdown(app) -> None:
+    if PG_POOL:
+        await PG_POOL.close()
 
 
 async def pg_startup(app) -> None:
@@ -125,8 +147,6 @@ def _parse_hours(args) -> int:
     except ValueError:
         return 24
 
-
-
 async def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker from Postgres database."""
     if PG_POOL is None:
@@ -138,7 +158,9 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
     digest_parts = []
     for art in articles_data[:limit]:
         text = art.get('body') or ''
+
         summary = await asyncio.to_thread(summarize_text, text) if text else ''
+
         digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
 
     return '\n\n'.join(digest_parts)
@@ -202,6 +224,7 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text('Собираю новости, пожалуйста подождите...')
     tasks = [asyncio.create_task(get_news_digest(t)) for t in tickers]
+
     digests = await asyncio.gather(*tasks, return_exceptions=True)
     results = []
     for t, d in zip(tickers, digests):
@@ -235,7 +258,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not articles:
         await update.message.reply_text('Новостей нет.')
         return
-
+      
     await save_articles_to_csv_async(articles, 'articles.csv')
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
@@ -251,7 +274,6 @@ async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(''.join(lines) or 'Лог пуст.')
     else:
         await update.message.reply_text('Файл лога не найден.')
-
 
 def main():
     token = os.getenv('TELEGRAM_TOKEN')
@@ -277,6 +299,7 @@ def main():
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('log', show_log))
+
 
     app.run_polling()
 

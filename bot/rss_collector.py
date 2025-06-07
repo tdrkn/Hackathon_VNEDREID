@@ -22,13 +22,11 @@ _ARTICLE_CACHE: Dict[str, str] = {}
 # Executor for heavy network operations
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("WORKERS", "8")))
 
-
 def _get_feed(url: str):
     """Return parsed feed, caching results to avoid redundant network calls."""
     if url not in _FEED_CACHE:
         _FEED_CACHE[url] = feedparser.parse(url)
     return _FEED_CACHE[url]
-
 
 async def _get_feed_async(url: str):
     loop = asyncio.get_running_loop()
@@ -135,10 +133,8 @@ def save_today_news(directory: str = ".") -> str:
     print(f"[\u2714] \u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e {len(df)} \u043d\u043e\u0432\u043e\u0441\u0442\u0435\u0439 \u0432 {path}")
     return path
 
-
 async def save_today_news_async(directory: str = ".") -> str:
     return await asyncio.to_thread(save_today_news, directory)
-
 
 def collect_recent_news(hours: int = 24) -> List[dict]:
     """Collect articles from the last `hours` hours from all RSS feeds."""
