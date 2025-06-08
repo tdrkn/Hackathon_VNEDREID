@@ -38,6 +38,7 @@ from .mybag import (
     load_token,
     save_token,
 )
+from .plotting import make_portfolio_chart
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -190,8 +191,10 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
+
         'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+
 
     )
 
@@ -209,6 +212,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/csvbag - скачать ваш портфель в CSV\n'
         '/log - показать последние строки лога\n'
         '/mybag - показать портфель Тинькофф Инвест\n'
+        '/chart - диаграмма распределения портфеля\n'
         '/help - показать эту справку'
     )
 
@@ -323,6 +327,25 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
 
 
+async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a portfolio chart for the user."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Строю график, пожалуйста подождите...')
+    rows = await get_portfolio_data(token)
+    buf = make_portfolio_chart(rows)
+    if not buf:
+        await update.message.reply_text('Не удалось построить график.')
+        return
+    buf.name = 'portfolio.png'
+    await update.message.reply_photo(buf)
+
+
+
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch recent news from RSS feeds and send the headlines."""
     hours = _parse_hours(context.args)
@@ -409,6 +432,7 @@ def main():
     app.add_handler(CommandHandler('csvbag', send_csvbag))
     app.add_handler(CommandHandler('log', show_log))
     app.add_handler(CommandHandler('mybag', mybag))
+    app.add_handler(CommandHandler('chart', chart))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 
