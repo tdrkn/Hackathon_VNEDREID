@@ -25,7 +25,14 @@ def _fetch_history(token: str, ticker: str, days: int) -> List[Dict]:
             interval=CandleInterval.CANDLE_INTERVAL_DAY,
         )
         data = [
-            {"date": c.time.date(), "close": _q_to_float(c.close)} for c in resp.candles
+            {
+                "date": c.time.date(),
+                "open": _q_to_float(c.open),
+                "high": _q_to_float(c.high),
+                "low": _q_to_float(c.low),
+                "close": _q_to_float(c.close),
+            }
+            for c in resp.candles
         ]
         return data
 
