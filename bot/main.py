@@ -141,7 +141,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
         'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+        'Доступные команды: /subscribe, /unsubscribe, /subs, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,7 +162,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/start - приветственное сообщение\n'
         '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
         '/unsubscribe <TICKER> - отписаться от тикера\n'
-
+        '/subs - показать текущие подписки\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
@@ -208,6 +209,14 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
 
 
+async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subs = await get_subscriptions(update.effective_user.id)
+    if not subs:
+        await update.message.reply_text('У вас нет подписок.')
+    else:
+        await update.message.reply_text('Ваши подписки: ' + ', '.join(subs))
+
+
 
 async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tickers = await get_subscriptions(update.effective_user.id)
@@ -235,11 +244,9 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ranking = await get_rankings()
     if not ranking:
-
         await update.message.reply_text('Подписок ещё нет.')
-
         return
-    lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
+    lines = [f'{idx + 1}. {ticker} — {count}' for idx, (ticker, count) in enumerate(ranking[:10])]
     await update.message.reply_text('\n'.join(lines))
     logging.info("Rank command used by %s", update.effective_user.id)
 
@@ -286,7 +293,6 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
     await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
-
 
 async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a portfolio chart for the user."""
@@ -418,6 +424,7 @@ def main():
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
+    app.add_handler(CommandHandler('subs', list_subscriptions))
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
