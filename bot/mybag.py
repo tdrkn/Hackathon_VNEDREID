@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple, List, Dict as TDict
 
-import aiosqlite
 from tinkoff.invest import Client, InstrumentIdType
 from tinkoff.invest.exceptions import UnauthenticatedError
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "subscriptions.db")
+from .userdb import load_token, save_token
 
 
 # ------------------------------------------------------------------
@@ -23,28 +21,6 @@ def _q_to_float(q) -> float:
     return q.units + q.nano / 1e9
 
 
-async def load_token(user_id: int) -> Optional[str]:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute("SELECT token FROM tokens WHERE user_id=?", (user_id,)) as cur:
-            row = await cur.fetchone()
-            return row[0] if row else None
-
-
-async def save_token(user_id: int, token: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            "INSERT OR REPLACE INTO tokens(user_id, token) VALUES (?, ?)",
-            (user_id, token),
-        )
-        await conn.commit()
-
-
-async def ensure_tokens_table() -> None:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)"
-        )
-        await conn.commit()
 
 
 def _make_resolver(instr):
