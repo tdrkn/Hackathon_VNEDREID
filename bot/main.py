@@ -1,7 +1,6 @@
 import os
 import logging
 
-import aiosqlite
 import pandas as pd
 import io
 
@@ -35,6 +34,14 @@ from .storage import save_articles_to_csv_async, CSV_PATH
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
+)
+from .userdb import (
+    init_db,
+    add_subscription,
+    add_subscriptions,
+    remove_subscription,
+    get_subscriptions,
+    get_rankings,
     load_token,
     save_token,
 )
@@ -44,7 +51,6 @@ from .market import get_ticker_history
 
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
 
 # Thread pool for future blocking tasks
@@ -63,69 +69,6 @@ logging.basicConfig(
 
 
 
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
-        )
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)'
-        )
-        await conn.commit()
-
-
-async def add_subscription(user_id: int, ticker: str):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-            (user_id, ticker.upper()),
-        )
-        await conn.commit()
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-async def add_subscriptions(user_id: int, tickers):
-    """Add multiple tickers to subscriptions."""
-    tickers_up = {t.upper() for t in tickers if t}
-    if not tickers_up:
-        return await get_subscriptions(user_id)
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.executemany(
-            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-            [(user_id, t) for t in tickers_up],
-        )
-        await conn.commit()
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-
-async def remove_subscription(user_id: int, ticker: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
-            (user_id, ticker.upper()),
-        )
-        await conn.commit()
-
-
-async def get_subscriptions(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-async def get_rankings():
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'
-        ) as cur:
-            rows = await cur.fetchall()
-    return rows
 
 
 async def pg_startup(app) -> None:
@@ -194,8 +137,9 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
-        'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /chart, /history, /help'
+
+        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
 
 
     )
