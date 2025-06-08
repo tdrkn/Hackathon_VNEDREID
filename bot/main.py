@@ -160,6 +160,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
+
         'Привет! Выберите команду с помощью кнопок ниже.',
         reply_markup=reply_markup,
 
@@ -173,6 +174,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         'Выберите команду:',
         reply_markup=reply_markup,
+
     )
 
 
@@ -192,7 +194,6 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
-
         '/start - приветственное сообщение\n'
         '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
         '/unsubscribe <TICKER> - отписаться от тикера\n'
@@ -327,23 +328,6 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
     await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
-
-async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a portfolio chart for the user."""
-    user_id = update.effective_user.id
-    token = await load_token(user_id)
-    if not token:
-        WAITING_TOKEN.add(user_id)
-        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
-        return
-    await update.message.reply_text('Строю график, пожалуйста подождите...')
-    rows = await get_portfolio_data(token)
-    buf = make_portfolio_chart(rows)
-    if not buf:
-        await update.message.reply_text('Не удалось построить график.')
-        return
-    buf.name = 'portfolio.png'
-    await update.message.reply_photo(buf)
 
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
