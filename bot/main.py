@@ -9,7 +9,7 @@ from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
 import asyncio
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -25,12 +25,11 @@ from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
     fetch_by_ticker,
+    fetch_ai_by_ticker,
     replace_portfolio,
     fetch_portfolio,
 )
-from .rss_collector import collect_recent_news_async
-
-from .storage import save_articles_to_csv_async, CSV_PATH
+from .storage import CSV_PATH
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
@@ -45,6 +44,10 @@ from .userdb import (
     load_token,
     save_token,
 )
+
+from .plotting import make_portfolio_chart, make_price_history_chart
+from .market import get_ticker_history
+
 
 
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -89,27 +92,6 @@ def summarize_text(text: str, sentences: int = 3) -> str:
     return ' '.join(str(sentence) for sentence in summary)
 
 
-def _parse_hours(args) -> int:
-    """Parse time interval arguments and return hours."""
-    if not args:
-        return 24
-    unit = args[0].lower()
-    qty = 1
-    if len(args) > 1:
-        try:
-            qty = int(args[1])
-        except ValueError:
-            qty = 1
-    if unit.startswith('hour'):
-        return qty
-    if unit.startswith('day'):
-        return qty * 24
-    if unit.startswith('week'):
-        return qty * 24 * 7
-    try:
-        return int(unit)
-    except ValueError:
-        return 24
 
 async def get_news_digest(ticker: str, limit: int = 3) -> str:
     """Return news digest for ticker from Postgres database."""
@@ -130,16 +112,51 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
     return '\n\n'.join(digest_parts)
 
 
+async def get_ai_news(ticker: str, limit: int = 3) -> str:
+    """Return analysed news summaries for ticker."""
+    if PG_POOL is None:
+        return 'База данных недоступна.'
+    articles_data = await fetch_ai_by_ticker(PG_POOL, ticker, limit)
+    if not articles_data:
+        return 'Новостей нет.'
+
+    lines = []
+    for art in articles_data:
+        summary = art.get('summary_text') or ''
+        link = art.get('link', '')
+        title = art.get('title', '')
+        lines.append(f"*{title}*\n{summary}\n{link}")
+
+    return '\n\n'.join(lines)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send welcome message with command buttons."""
+    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
+        'Привет! Выберите команду с помощью кнопок ниже.',
+        reply_markup=reply_markup,
+    )
+
 
         'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
         'Доступные команды: /subscribe, /unsubscribe, /subs, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
 
+
+
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display command buttons."""
+    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        'Выберите команду:',
+        reply_markup=reply_markup,
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
     await update.message.reply_text(
 
         '/start - приветственное сообщение\n'
@@ -149,12 +166,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
-        '/csv - скачать текущий CSV файл со статьями\n'
-        '/csvbag - скачать ваш портфель в CSV\n'
-        '/log - показать последние строки лога\n'
+        '/csv - скачать текущий CSV файл со статьями\n\n'
+        '*Портфель*\n'
         '/mybag - показать портфель Тинькофф Инвест\n'
+        '/csvbag - скачать ваш портфель в CSV\n'
+        '/chart - диаграмма распределения портфеля\n'
+        '/history <TICKER> [days] - график цены тикера\n\n'
+        '*Прочее*\n'
+        '/log - показать последние строки лога\n'
         '/help - показать эту справку'
     )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
 
 
 
@@ -272,21 +294,70 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
     await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
 
+async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a portfolio chart for the user."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Строю график, пожалуйста подождите...')
+    rows = await get_portfolio_data(token)
+    buf = make_portfolio_chart(rows)
+    if not buf:
+        await update.message.reply_text('Не удалось построить график.')
+        return
+    buf.name = 'portfolio.png'
+    await update.message.reply_photo(buf)
+
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send price history chart for a ticker."""
+    if not context.args:
+        await update.message.reply_text('Использование: /history <TICKER> [days]')
+        return
+    ticker = context.args[0]
+    days = 30
+    if len(context.args) > 1:
+        try:
+            days = int(context.args[1])
+        except ValueError:
+            days = 30
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Получаю данные, пожалуйста подождите...')
+    points = await get_ticker_history(token, ticker, days)
+    buf = make_price_history_chart(points)
+    if not buf:
+        await update.message.reply_text('Не удалось построить график.')
+        return
+    buf.name = f'{ticker}.png'
+    await update.message.reply_photo(buf)
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fetch recent news from RSS feeds and send the headlines."""
-    hours = _parse_hours(context.args)
-    await update.message.reply_text('Собираю новости, пожалуйста подождите...')
-    articles = await collect_recent_news_async(hours)
-    if not articles:
-        await update.message.reply_text('Новостей нет.')
+    """Show recent analysed news for user's subscriptions."""
+    tickers = await get_subscriptions(update.effective_user.id)
+    if not tickers:
+        await update.message.reply_text('У вас нет подписок.')
         return
-      
-    await save_articles_to_csv_async(articles)
+    await update.message.reply_text('Ищу новости, пожалуйста подождите...')
 
-    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
-    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
-    logging.info("News command used by %s, %d articles", update.effective_user.id, len(articles))
+    tasks = [asyncio.create_task(get_ai_news(t)) for t in tickers]
+    digests = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for t, d in zip(tickers, digests):
+        if isinstance(d, Exception):
+            msg = 'Ошибка получения новостей'
+        else:
+            msg = d
+        results.append(f'*{t}*\n{msg}')
+    await update.message.reply_text('\n\n'.join(results), parse_mode='Markdown')
+    logging.info("News command used by %s for %d tickers", update.effective_user.id, len(tickers))
 
 
 async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -349,6 +420,7 @@ def main():
     )
 
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('menu', show_menu))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
@@ -360,6 +432,8 @@ def main():
     app.add_handler(CommandHandler('csvbag', send_csvbag))
     app.add_handler(CommandHandler('log', show_log))
     app.add_handler(CommandHandler('mybag', mybag))
+    app.add_handler(CommandHandler('chart', chart))
+    app.add_handler(CommandHandler('history', history))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 

@@ -36,6 +36,19 @@ async def ensure_schema(pool):
             )
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_news (
+                id BIGSERIAL PRIMARY KEY,
+                ticker TEXT,
+                title TEXT,
+                summary TEXT,
+                link TEXT UNIQUE,
+                published_at TIMESTAMPTZ,
+                data JSONB
+            )
+            """
+        )
 
 async def insert_articles(pool, articles):
     if not articles:
@@ -141,3 +154,58 @@ async def fetch_portfolio(pool, user_id: int) -> List[Dict]:
             user_id,
         )
         return [dict(r) for r in rows]
+
+
+async def insert_ai_articles(pool, articles):
+    """Insert analysed articles into ai_news table."""
+    if not articles:
+        return 0
+    records = []
+    for a in articles:
+        date = a.get("published_at")
+        dt = None
+        if isinstance(date, str) and date:
+            try:
+                dt = datetime.fromisoformat(date)
+            except ValueError:
+                dt = datetime.utcnow()
+        elif isinstance(date, datetime):
+            dt = date
+        else:
+            dt = datetime.utcnow()
+        records.append(
+            (
+                a.get("ticker"),
+                a.get("title"),
+                a.get("summary_text"),
+                a.get("link"),
+                dt,
+                a,
+            )
+        )
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """
+            INSERT INTO ai_news(ticker, title, summary, link, published_at, data)
+            VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+            ON CONFLICT (link) DO NOTHING
+            """,
+            records,
+        )
+    return len(records)
+
+
+async def fetch_ai_by_ticker(pool, ticker: str, limit: int = 5) -> List[Dict]:
+    """Return analysed news for a ticker."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT data FROM ai_news
+            WHERE ticker=$1
+            ORDER BY published_at DESC
+            LIMIT $2
+            """,
+            ticker.upper(),
+            limit,
+        )
+        return [dict(r["data"]) for r in rows]
