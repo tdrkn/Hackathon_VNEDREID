@@ -9,7 +9,7 @@ from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lsa import LsaSummarizer
 import asyncio
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -131,9 +131,22 @@ async def get_ai_news(ticker: str, limit: int = 3) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send welcome message."""
+    """Send welcome message with command buttons."""
+    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        'Привет! Используйте команду /help, чтобы узнать, что я умею.'
+        'Привет! Выберите команду с помощью кнопок ниже.',
+        reply_markup=reply_markup,
+    )
+
+
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display command buttons."""
+    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        'Выберите команду:',
+        reply_markup=reply_markup,
     )
 
 
@@ -397,6 +410,7 @@ def main():
     )
 
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('menu', show_menu))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
