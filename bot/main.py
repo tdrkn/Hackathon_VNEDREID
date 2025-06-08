@@ -36,6 +36,7 @@ from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
 )
+from .gemini import analyze_text, analyze_portfolio
 from .userdb import (
     init_db,
     add_subscription,
@@ -137,6 +138,32 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
     return '\n\n'.join(digest_parts)
 
 
+async def get_digest_ai(ticker: str, limit: int = 3) -> str:
+    """Return news digest with Gemini analysis for ticker."""
+    try:
+        articles_data = await collect_ticker_news_async(ticker)
+    except Exception as e:
+        logging.error('Failed to collect RSS for %s: %s', ticker, e)
+        return 'Ошибка получения новостей'
+
+    if not articles_data:
+        return 'Статьи не найдены.'
+
+    parts = []
+    for art in articles_data[:limit]:
+        text = f"{art.get('title','')}\n{art.get('text','')}"
+        result = await analyze_text(text)
+        summary = ''
+        if result:
+            summary = result.get('summary_text') or ''
+        if not summary:
+            raw = art.get('text') or ''
+            summary = await asyncio.to_thread(summarize_text, raw) if raw else ''
+        parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
+
+    return '\n\n'.join(parts)
+
+
 async def get_ai_news(ticker: str, limit: int = 3) -> str:
     """Return analysed news summaries for ticker."""
     if PG_POOL is None:
@@ -201,6 +228,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/unsubscribe <TICKER> - отписаться от тикера\n\n'
         '*Новости*\n'
         '/digest - получить новостной дайджест по подпискам\n'
+        '/digest_analytics - аналитический дайджест через Gemini\n'
         '/subscriptions - показать ваши подписки\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
         '/csv - скачать текущий CSV файл со статьями\n\n'
@@ -208,7 +236,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/mybag - показать портфель Тинькофф Инвест\n'
         '/csvbag - скачать ваш портфель в CSV\n'
         '/chart - диаграмма распределения портфеля\n'
-        '/history <TICKER> [days] - график цены тикера\n\n'
+        '/history <TICKER> [days] - график цены тикера\n'
+        '/analysis - анализ портфеля через Gemini\n\n'
         '*Прочее*\n'
         '/log - показать последние строки лога\n'
         '/help - показать эту справку'
@@ -276,6 +305,26 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     messages = results
     await update.message.reply_text('\n\n'.join(messages), parse_mode='Markdown')
     logging.info("Digest sent to %s for %d tickers", update.effective_user.id, len(tickers))
+
+
+async def digest_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send news digest with Gemini analytics for subscriptions."""
+    tickers = await get_subscriptions(update.effective_user.id)
+    if not tickers:
+        await update.message.reply_text('У вас нет подписок.')
+        return
+    await update.message.reply_text('Собираю аналитику, пожалуйста подождите...')
+    tasks = [asyncio.create_task(get_digest_ai(t)) for t in tickers]
+    digests = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for t, d in zip(tickers, digests):
+        if isinstance(d, Exception):
+            msg = 'Ошибка получения новостей'
+        else:
+            msg = d
+        results.append(f'*{t}*\n{msg}')
+    await update.message.reply_text('\n\n'.join(results), parse_mode='Markdown')
+    logging.info("Digest analytics sent to %s for %d tickers", update.effective_user.id, len(tickers))
 
 
 async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -368,6 +417,26 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     buf.name = f'{ticker}.png'
     await update.message.reply_photo(buf)
+
+
+async def analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Analyze user portfolio using Gemini."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Анализирую портфель, пожалуйста подождите...')
+    rows = await get_portfolio_data(token)
+    if not rows:
+        await update.message.reply_text('Портфель пуст.')
+        return
+    result = await analyze_portfolio(rows)
+    if not result:
+        await update.message.reply_text('Не удалось выполнить анализ.')
+        return
+    await update.message.reply_text(result)
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send recent news stored in PostgreSQL."""
@@ -465,6 +534,7 @@ def main():
     app.add_handler(CommandHandler('subs', list_subscriptions))
     app.add_handler(CommandHandler('subscriptions', list_subscriptions))
     app.add_handler(CommandHandler('digest', digest))
+    app.add_handler(CommandHandler('digest_analytics', digest_analytics))
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('csv', send_csv))
     app.add_handler(CommandHandler('csvbag', send_csvbag))
@@ -472,6 +542,7 @@ def main():
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(CommandHandler('chart', chart))
     app.add_handler(CommandHandler('history', history))
+    app.add_handler(CommandHandler('analysis', analysis))
     app.add_handler(MessageHandler(
         filters.Regex('^(Все команды|Дайджест|Мой портфель|Новости)$'),
         handle_menu_button,
