@@ -36,6 +36,7 @@ from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
 )
+from .gemini import analyze_portfolio
 from .userdb import (
     init_db,
     add_subscription,
@@ -208,7 +209,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/mybag - показать портфель Тинькофф Инвест\n'
         '/csvbag - скачать ваш портфель в CSV\n'
         '/chart - диаграмма распределения портфеля\n'
-        '/history <TICKER> [days] - график цены тикера\n\n'
+        '/history <TICKER> [days] - график цены тикера\n'
+        '/analysis - анализ портфеля через Gemini\n\n'
         '*Прочее*\n'
         '/log - показать последние строки лога\n'
         '/help - показать эту справку'
@@ -369,6 +371,26 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     buf.name = f'{ticker}.png'
     await update.message.reply_photo(buf)
 
+
+async def analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Analyze user portfolio using Gemini."""
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Анализирую портфель, пожалуйста подождите...')
+    rows = await get_portfolio_data(token)
+    if not rows:
+        await update.message.reply_text('Портфель пуст.')
+        return
+    result = await analyze_portfolio(rows)
+    if not result:
+        await update.message.reply_text('Не удалось выполнить анализ.')
+        return
+    await update.message.reply_text(result)
+
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send recent news stored in PostgreSQL."""
     hours = _parse_hours(context.args)
@@ -472,6 +494,7 @@ def main():
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(CommandHandler('chart', chart))
     app.add_handler(CommandHandler('history', history))
+    app.add_handler(CommandHandler('analysis', analysis))
     app.add_handler(MessageHandler(
         filters.Regex('^(Все команды|Дайджест|Мой портфель|Новости)$'),
         handle_menu_button,
