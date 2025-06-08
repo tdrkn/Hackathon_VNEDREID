@@ -100,6 +100,23 @@ async def fetch_recent(pool, hours=24):
         )
         return [dict(r) for r in rows]
 
+async def fetch_ai_recent(pool, hours: int = 24) -> List[Dict]:
+    """Return recently analysed news from ai_news table."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT ticker, company_name, news_type, topics, region,
+                   correlated_markets, macro_sensitive, likely_to_influence,
+                   influence_reason, sentiment, summary_text, raw_text,
+                   title, link, published_at
+            FROM ai_news
+            WHERE published_at >= now() - ($1 || ' hours')::interval
+            ORDER BY published_at DESC
+            """,
+            hours,
+        )
+        return [dict(r) for r in rows]
+
 async def fetch_by_ticker(pool, ticker, limit=50):
     pattern = f"%{ticker.upper()}%"
     async with pool.acquire() as conn:
