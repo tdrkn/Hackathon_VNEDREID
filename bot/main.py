@@ -132,17 +132,19 @@ async def get_ai_news(ticker: str, limit: int = 3) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send welcome message with command buttons."""
-    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'новости']]
+    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'Новости']]
+
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         'Привет! Выберите команду с помощью кнопок ниже.',
         reply_markup=reply_markup,
+
     )
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Display command buttons."""
-    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'новости']]
+    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'Новости']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         'Выберите команду:',
@@ -159,18 +161,18 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await digest(update, context)
     elif text == 'Мой портфель':
         await mybag(update, context)
-    elif text == 'новости':
+    elif text == 'Новости':
         await news(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send detailed help grouped by topics."""
-    help_text = (
-        'Доступные команды:\n\n'
-        '*Управление подписками*\n'
+
+    await update.message.reply_text(
+
+        '/start - приветственное сообщение\n'
         '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
-        '/unsubscribe <TICKER> - отписаться от тикера\n\n'
-        '*Новости*\n'
+        '/unsubscribe <TICKER> - отписаться от тикера\n'
+        '/subs - показать текущие подписки\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
@@ -217,6 +219,14 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
 
 
+async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subs = await get_subscriptions(update.effective_user.id)
+    if not subs:
+        await update.message.reply_text('У вас нет подписок.')
+    else:
+        await update.message.reply_text('Ваши подписки: ' + ', '.join(subs))
+
+
 
 async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     tickers = await get_subscriptions(update.effective_user.id)
@@ -244,11 +254,9 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ranking = await get_rankings()
     if not ranking:
-
         await update.message.reply_text('Подписок ещё нет.')
-
         return
-    lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
+    lines = [f'{idx + 1}. {ticker} — {count}' for idx, (ticker, count) in enumerate(ranking[:10])]
     await update.message.reply_text('\n'.join(lines))
     logging.info("Rank command used by %s", update.effective_user.id)
 
@@ -295,7 +303,6 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
     await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
-
 
 async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a portfolio chart for the user."""
@@ -427,6 +434,7 @@ def main():
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
+    app.add_handler(CommandHandler('subs', list_subscriptions))
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
@@ -437,7 +445,7 @@ def main():
     app.add_handler(CommandHandler('chart', chart))
     app.add_handler(CommandHandler('history', history))
     app.add_handler(MessageHandler(
-        filters.Regex('^(Все команды|Дайджест|Мой портфель|новости)$'),
+        filters.Regex('^(Все команды|Дайджест|Мой портфель|Новости)$'),
         handle_menu_button,
     ))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
