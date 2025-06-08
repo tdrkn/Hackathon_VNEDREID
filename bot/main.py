@@ -38,7 +38,10 @@ from .mybag import (
     load_token,
     save_token,
 )
-from .plotting import make_portfolio_chart
+
+from .plotting import make_portfolio_chart, make_price_history_chart
+from .market import get_ticker_history
+
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -191,9 +194,8 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
-
-        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+        'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /chart, /history, /help'
 
 
     )
@@ -213,6 +215,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/log - показать последние строки лога\n'
         '/mybag - показать портфель Тинькофф Инвест\n'
         '/chart - диаграмма распределения портфеля\n'
+        '/history <TICKER> [days] - график цены тикера\n'
         '/help - показать эту справку'
     )
 
@@ -345,6 +348,32 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_photo(buf)
 
 
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send price history chart for a ticker."""
+    if not context.args:
+        await update.message.reply_text('Использование: /history <TICKER> [days]')
+        return
+    ticker = context.args[0]
+    days = 30
+    if len(context.args) > 1:
+        try:
+            days = int(context.args[1])
+        except ValueError:
+            days = 30
+    user_id = update.effective_user.id
+    token = await load_token(user_id)
+    if not token:
+        WAITING_TOKEN.add(user_id)
+        await update.message.reply_text('Отправьте токен Тинькофф Инвест в формате t.*')
+        return
+    await update.message.reply_text('Получаю данные, пожалуйста подождите...')
+    points = await get_ticker_history(token, ticker, days)
+    buf = make_price_history_chart(points)
+    if not buf:
+        await update.message.reply_text('Не удалось построить график.')
+        return
+    buf.name = f'{ticker}.png'
+    await update.message.reply_photo(buf)
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch recent news from RSS feeds and send the headlines."""
@@ -433,6 +462,7 @@ def main():
     app.add_handler(CommandHandler('log', show_log))
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(CommandHandler('chart', chart))
+    app.add_handler(CommandHandler('history', history))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 
