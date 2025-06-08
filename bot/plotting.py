@@ -52,3 +52,4 @@ def make_price_history_chart(points: List[Dict]) -> io.BytesIO | None:
     plt.close(fig)
     buf.seek(0)
     return buf
+

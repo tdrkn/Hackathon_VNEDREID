@@ -38,8 +38,10 @@ from .mybag import (
     load_token,
     save_token,
 )
+
 from .plotting import make_portfolio_chart, make_price_history_chart
 from .market import get_ticker_history
+
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
@@ -195,6 +197,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
         'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /chart, /history, /help'
 
+
     )
 
 
@@ -202,7 +205,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
 
         '/start - приветственное сообщение\n'
-        '/subscribe <TICKER> - подписаться на тикер\n'
+        '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
         '/unsubscribe <TICKER> - отписаться от тикера\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
@@ -221,12 +224,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
 
-        await update.message.reply_text('Использование: /subscribe <TICKER>')
+        await update.message.reply_text('Использование: /subscribe <TICKER> [...]')
         return
-    ticker = context.args[0]
-    await add_subscription(update.effective_user.id, ticker)
-    await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
-    logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
+    tickers = context.args
+    subs = await add_subscriptions(update.effective_user.id, tickers)
+    await update.message.reply_text(
+        'Текущие подписки: ' + ', '.join(subs)
+    )
+    logging.info(
+        "%s subscribed to %s",
+        update.effective_user.id,
+        ','.join([t.upper() for t in tickers]),
+    )
 
 
 
@@ -365,7 +374,6 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     buf.name = f'{ticker}.png'
     await update.message.reply_photo(buf)
-
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fetch recent news from RSS feeds and send the headlines."""
