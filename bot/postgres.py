@@ -199,14 +199,24 @@ async def insert_ai_articles(pool, articles):
             dt = date
         else:
             dt = datetime.utcnow()
+        news_type = a.get("news_type")
+        if news_type is not None and not isinstance(news_type, list):
+            news_type = [str(news_type)]
+        topics = a.get("topics")
+        if topics is not None and not isinstance(topics, list):
+            topics = [str(topics)]
+        corr = a.get("correlated_markets")
+        if corr is not None and not isinstance(corr, list):
+            corr = [str(corr)]
+
         records.append(
             (
                 a.get("ticker"),
                 a.get("company_name"),
-                a.get("news_type"),
-                a.get("topics"),
+                news_type,
+                topics,
                 a.get("region"),
-                a.get("correlated_markets"),
+                corr,
                 a.get("macro_sensitive"),
                 a.get("likely_to_influence"),
                 a.get("influence_reason"),
