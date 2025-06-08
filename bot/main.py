@@ -24,13 +24,13 @@ load_dotenv()
 from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
-    fetch_by_ticker,
     fetch_ai_by_ticker,
+    fetch_recent,
     replace_portfolio,
     fetch_portfolio,
 )
-from .rss_collector import collect_recent_news_async
-from .storage import CSV_PATH, save_articles_to_csv_async
+from .storage import CSV_PATH
+from .rss_collector import collect_ticker_news_async
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
@@ -118,19 +118,20 @@ def _parse_hours(args) -> int:
 
 
 async def get_news_digest(ticker: str, limit: int = 3) -> str:
-    """Return news digest for ticker from Postgres database."""
-    if PG_POOL is None:
-        return 'База данных недоступна.'
-    articles_data = await fetch_by_ticker(PG_POOL, ticker, limit * 5)
+    """Return news digest for ticker from RSS feeds."""
+    try:
+        articles_data = await collect_ticker_news_async(ticker)
+    except Exception as e:
+        logging.error('Failed to collect RSS for %s: %s', ticker, e)
+        return 'Ошибка получения новостей'
+
     if not articles_data:
         return 'Статьи не найдены.'
 
     digest_parts = []
     for art in articles_data[:limit]:
-        text = art.get('body') or ''
-
+        text = art.get('text') or ''
         summary = await asyncio.to_thread(summarize_text, text) if text else ''
-
         digest_parts.append(f"*{art['title']}*\n{summary}\n{art['link']}")
 
     return '\n\n'.join(digest_parts)
@@ -377,15 +378,21 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_photo(buf)
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fetch recent news from RSS feeds and send the headlines."""
+    """Send recent news stored in PostgreSQL."""
     hours = _parse_hours(context.args)
-    await update.message.reply_text('Собираю новости, пожалуйста подождите...')
-    articles = await collect_recent_news_async(hours)
+    await update.message.reply_text('Получаю новости, пожалуйста подождите...')
+    if PG_POOL is None:
+        await update.message.reply_text('База данных недоступна.')
+        return
+    try:
+        articles = await fetch_recent(PG_POOL, hours)
+    except Exception as e:
+        logging.error('Failed to fetch news: %s', e)
+        await update.message.reply_text('Ошибка получения новостей.')
+        return
     if not articles:
         await update.message.reply_text('Новостей нет.')
         return
-
-    await save_articles_to_csv_async(articles)
 
     lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
