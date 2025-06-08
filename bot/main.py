@@ -36,6 +36,7 @@ from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
 )
+
 from .gemini import analyze_text, analyze_portfolio
 from .userdb import (
     init_db,
