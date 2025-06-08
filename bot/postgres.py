@@ -41,11 +41,20 @@ async def ensure_schema(pool):
             CREATE TABLE IF NOT EXISTS ai_news (
                 id BIGSERIAL PRIMARY KEY,
                 ticker TEXT,
+                company_name TEXT,
+                news_type TEXT[],
+                topics TEXT[],
+                region TEXT,
+                correlated_markets TEXT[],
+                macro_sensitive BOOLEAN,
+                likely_to_influence BOOLEAN,
+                influence_reason TEXT,
+                sentiment TEXT,
+                summary_text TEXT,
+                raw_text TEXT,
                 title TEXT,
-                summary TEXT,
                 link TEXT UNIQUE,
-                published_at TIMESTAMPTZ,
-                data JSONB
+                published_at TIMESTAMPTZ
             )
             """
         )
@@ -176,18 +185,34 @@ async def insert_ai_articles(pool, articles):
         records.append(
             (
                 a.get("ticker"),
-                a.get("title"),
+                a.get("company_name"),
+                a.get("news_type"),
+                a.get("topics"),
+                a.get("region"),
+                a.get("correlated_markets"),
+                a.get("macro_sensitive"),
+                a.get("likely_to_influence"),
+                a.get("influence_reason"),
+                a.get("sentiment"),
                 a.get("summary_text"),
+                a.get("raw_text"),
+                a.get("title"),
                 a.get("link"),
                 dt,
-                a,
             )
         )
     async with pool.acquire() as conn:
         await conn.executemany(
             """
-            INSERT INTO ai_news(ticker, title, summary, link, published_at, data)
-            VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+            INSERT INTO ai_news(
+                ticker, company_name, news_type, topics, region,
+                correlated_markets, macro_sensitive, likely_to_influence,
+                influence_reason, sentiment, summary_text, raw_text,
+                title, link, published_at
+            )
+            VALUES (
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+            )
             ON CONFLICT (link) DO NOTHING
             """,
             records,
@@ -200,7 +225,11 @@ async def fetch_ai_by_ticker(pool, ticker: str, limit: int = 5) -> List[Dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT data FROM ai_news
+            SELECT ticker, company_name, news_type, topics, region,
+                   correlated_markets, macro_sensitive, likely_to_influence,
+                   influence_reason, sentiment, summary_text, raw_text,
+                   title, link, published_at
+            FROM ai_news
             WHERE ticker=$1
             ORDER BY published_at DESC
             LIMIT $2
@@ -208,4 +237,4 @@ async def fetch_ai_by_ticker(pool, ticker: str, limit: int = 5) -> List[Dict]:
             ticker.upper(),
             limit,
         )
-        return [dict(r["data"]) for r in rows]
+        return [dict(r) for r in rows]
