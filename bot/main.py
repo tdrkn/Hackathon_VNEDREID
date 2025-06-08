@@ -132,27 +132,37 @@ async def get_ai_news(ticker: str, limit: int = 3) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send welcome message with command buttons."""
-    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'Новости']]
+
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         'Привет! Выберите команду с помощью кнопок ниже.',
         reply_markup=reply_markup,
+
     )
-
-
-        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
-        'Доступные команды: /subscribe, /unsubscribe, /subs, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
-
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Display command buttons."""
-    keyboard = [['/help', '/digest'], ['/mybag', '/news']]
+    keyboard = [['Все команды', 'Дайджест'], ['Мой портфель', 'Новости']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         'Выберите команду:',
         reply_markup=reply_markup,
     )
+
+
+async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Map button labels to the corresponding commands."""
+    text = update.message.text
+    if text == 'Все команды':
+        await help_command(update, context)
+    elif text == 'Дайджест':
+        await digest(update, context)
+    elif text == 'Мой портфель':
+        await mybag(update, context)
+    elif text == 'Новости':
+        await news(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -434,6 +444,10 @@ def main():
     app.add_handler(CommandHandler('mybag', mybag))
     app.add_handler(CommandHandler('chart', chart))
     app.add_handler(CommandHandler('history', history))
+    app.add_handler(MessageHandler(
+        filters.Regex('^(Все команды|Дайджест|Мой портфель|Новости)$'),
+        handle_menu_button,
+    ))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_token_message))
 
 
