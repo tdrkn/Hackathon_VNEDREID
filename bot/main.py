@@ -29,7 +29,8 @@ from .postgres import (
     replace_portfolio,
     fetch_portfolio,
 )
-from .storage import CSV_PATH
+from .rss_collector import collect_recent_news_async
+from .storage import CSV_PATH, save_articles_to_csv_async
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
@@ -90,6 +91,29 @@ def summarize_text(text: str, sentences: int = 3) -> str:
     summarizer = LsaSummarizer()
     summary = summarizer(parser.document, sentences)
     return ' '.join(str(sentence) for sentence in summary)
+
+
+def _parse_hours(args) -> int:
+    """Parse time interval arguments and return hours."""
+    if not args:
+        return 24
+    unit = args[0].lower()
+    qty = 1
+    if len(args) > 1:
+        try:
+            qty = int(args[1])
+        except ValueError:
+            qty = 1
+    if unit.startswith('hour'):
+        return qty
+    if unit.startswith('day'):
+        return qty * 24
+    if unit.startswith('week'):
+        return qty * 24 * 7
+    try:
+        return int(unit)
+    except ValueError:
+        return 24
 
 
 
@@ -350,24 +374,23 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_photo(buf)
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show recent analysed news for user's subscriptions."""
-    tickers = await get_subscriptions(update.effective_user.id)
-    if not tickers:
-        await update.message.reply_text('У вас нет подписок.')
+    """Fetch recent news from RSS feeds and send the headlines."""
+    hours = _parse_hours(context.args)
+    await update.message.reply_text('Собираю новости, пожалуйста подождите...')
+    articles = await collect_recent_news_async(hours)
+    if not articles:
+        await update.message.reply_text('Новостей нет.')
         return
-    await update.message.reply_text('Ищу новости, пожалуйста подождите...')
 
-    tasks = [asyncio.create_task(get_ai_news(t)) for t in tickers]
-    digests = await asyncio.gather(*tasks, return_exceptions=True)
-    results = []
-    for t, d in zip(tickers, digests):
-        if isinstance(d, Exception):
-            msg = 'Ошибка получения новостей'
-        else:
-            msg = d
-        results.append(f'*{t}*\n{msg}')
-    await update.message.reply_text('\n\n'.join(results), parse_mode='Markdown')
-    logging.info("News command used by %s for %d tickers", update.effective_user.id, len(tickers))
+    await save_articles_to_csv_async(articles)
+
+    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
+    await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
+    logging.info(
+        "News command used by %s, %d articles",
+        update.effective_user.id,
+        len(articles),
+    )
 
 
 async def show_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
