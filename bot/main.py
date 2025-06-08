@@ -1,7 +1,6 @@
 import os
 import logging
 
-import aiosqlite
 import pandas as pd
 import io
 
@@ -35,12 +34,19 @@ from .storage import save_articles_to_csv_async, CSV_PATH
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
+)
+from .userdb import (
+    init_db,
+    add_subscription,
+    add_subscriptions,
+    remove_subscription,
+    get_subscriptions,
+    get_rankings,
     load_token,
     save_token,
 )
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
 LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
 
 # Thread pool for future blocking tasks
@@ -59,53 +65,6 @@ logging.basicConfig(
 
 
 
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
-        )
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)'
-        )
-        await conn.commit()
-
-
-async def add_subscription(user_id: int, ticker: str):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-            (user_id, ticker.upper()),
-        )
-        await conn.commit()
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-
-async def remove_subscription(user_id: int, ticker: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
-            (user_id, ticker.upper()),
-        )
-        await conn.commit()
-
-
-async def get_subscriptions(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-async def get_rankings():
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC'
-        ) as cur:
-            rows = await cur.fetchall()
-    return rows
 
 
 async def pg_startup(app) -> None:
@@ -174,8 +133,8 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
-        'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
+        'Доступные команды: /subscribe, /unsubscribe, /subs, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
 
     )
 
@@ -184,8 +143,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
 
         '/start - приветственное сообщение\n'
-        '/subscribe <TICKER> - подписаться на тикер\n'
+        '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
         '/unsubscribe <TICKER> - отписаться от тикера\n'
+        '/subs - показать текущие подписки\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
@@ -201,12 +161,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
 
-        await update.message.reply_text('Использование: /subscribe <TICKER>')
+        await update.message.reply_text('Использование: /subscribe <TICKER> [...]')
         return
-    ticker = context.args[0]
-    await add_subscription(update.effective_user.id, ticker)
-    await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
-    logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
+    tickers = context.args
+    subs = await add_subscriptions(update.effective_user.id, tickers)
+    await update.message.reply_text(
+        'Текущие подписки: ' + ', '.join(subs)
+    )
+    logging.info(
+        "%s subscribed to %s",
+        update.effective_user.id,
+        ','.join([t.upper() for t in tickers]),
+    )
 
 
 
@@ -219,6 +185,14 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await remove_subscription(update.effective_user.id, ticker)
     await update.message.reply_text(f'Вы отписались от {ticker.upper()}')
     logging.info("%s unsubscribed from %s", update.effective_user.id, ticker.upper())
+
+
+async def list_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subs = await get_subscriptions(update.effective_user.id)
+    if not subs:
+        await update.message.reply_text('У вас нет подписок.')
+    else:
+        await update.message.reply_text('Ваши подписки: ' + ', '.join(subs))
 
 
 
@@ -248,11 +222,9 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ranking = await get_rankings()
     if not ranking:
-
         await update.message.reply_text('Подписок ещё нет.')
-
         return
-    lines = [f'{idx+1}. {ticker} - {count}' for idx, (ticker, count) in enumerate(ranking)]
+    lines = [f'{idx + 1}. {ticker} — {count}' for idx, (ticker, count) in enumerate(ranking[:10])]
     await update.message.reply_text('\n'.join(lines))
     logging.info("Rank command used by %s", update.effective_user.id)
 
@@ -265,12 +237,15 @@ async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Получаю портфель, пожалуйста подождите...')
         text = await get_portfolio_text(token)
         rows = await get_portfolio_data(token)
+        tickers = [r.get('ticker') for r in rows]
+        await add_subscriptions(user_id, [t for t in tickers if t and t not in ('-', '—')])
         if PG_POOL:
             try:
                 await replace_portfolio(PG_POOL, user_id, rows)
             except Exception as e:
                 logging.error('Failed to save portfolio: %s', e)
         await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+        await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
         return
 
     WAITING_TOKEN.add(user_id)
@@ -287,12 +262,15 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text('Токен сохранён. Получаю портфель...')
     text = await get_portfolio_text(token)
     rows = await get_portfolio_data(token)
+    tickers = [r.get('ticker') for r in rows]
+    await add_subscriptions(user_id, [t for t in tickers if t and t not in ('-', '—')])
     if PG_POOL:
         try:
             await replace_portfolio(PG_POOL, user_id, rows)
         except Exception as e:
             logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+    await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
 
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -374,6 +352,7 @@ def main():
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
+    app.add_handler(CommandHandler('subs', list_subscriptions))
     app.add_handler(CommandHandler('digest', digest))
     app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
