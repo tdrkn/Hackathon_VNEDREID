@@ -140,6 +140,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+
+
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Display command buttons."""
     keyboard = [['/help', '/digest'], ['/mybag', '/news']]
@@ -151,13 +155,13 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send detailed help grouped by topics."""
-    help_text = (
-        'Доступные команды:\n\n'
-        '*Управление подписками*\n'
+
+    await update.message.reply_text(
+
+        '/start - приветственное сообщение\n'
         '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
-        '/unsubscribe <TICKER> - отписаться от тикера\n\n'
-        '*Новости*\n'
+        '/unsubscribe <TICKER> - отписаться от тикера\n'
+
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
