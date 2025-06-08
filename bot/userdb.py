@@ -77,14 +77,6 @@ async def get_subscriptions(user_id: int) -> List[str]:
     return [row[0] for row in rows]
 
 
-async def get_rankings() -> List[tuple]:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            "SELECT ticker, COUNT(*) as cnt FROM subscriptions GROUP BY ticker ORDER BY cnt DESC"
-        ) as cur:
-            rows = await cur.fetchall()
-    return rows
-
 
 async def load_token(user_id: int) -> Optional[str]:
     async with aiosqlite.connect(DB_PATH) as conn:
