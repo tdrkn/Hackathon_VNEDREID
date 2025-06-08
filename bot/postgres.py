@@ -200,6 +200,7 @@ async def insert_ai_articles(pool, articles):
         else:
             dt = datetime.utcnow()
         news_type = a.get("news_type")
+
         if news_type is not None and not isinstance(news_type, list):
             news_type = [str(news_type)]
         topics = a.get("topics")
@@ -207,6 +208,7 @@ async def insert_ai_articles(pool, articles):
             topics = [str(topics)]
         corr = a.get("correlated_markets")
         if corr is not None and not isinstance(corr, list):
+
             corr = [str(corr)]
 
         records.append(
