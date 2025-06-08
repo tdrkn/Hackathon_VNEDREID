@@ -341,7 +341,9 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send price history chart for a ticker."""
     if not context.args:
-        await update.message.reply_text('Использование: /history <TICKER> [days]')
+        await update.message.reply_text(
+            'Использование: /history <TICKER> [days]'
+        )
         return
     ticker = context.args[0]
     days = 30
