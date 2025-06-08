@@ -135,33 +135,34 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send welcome message."""
     await update.message.reply_text(
-
-
-        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
-
-
+        'Привет! Используйте команду /help, чтобы узнать, что я умею.'
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-
-        '/start - приветственное сообщение\n'
+    """Send detailed help grouped by topics."""
+    help_text = (
+        'Доступные команды:\n\n'
+        '*Управление подписками*\n'
         '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
-        '/unsubscribe <TICKER> - отписаться от тикера\n'
+        '/unsubscribe <TICKER> - отписаться от тикера\n\n'
+        '*Новости*\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
-        '/csv - скачать текущий CSV файл со статьями\n'
-        '/csvbag - скачать ваш портфель в CSV\n'
-        '/log - показать последние строки лога\n'
+        '/csv - скачать текущий CSV файл со статьями\n\n'
+        '*Портфель*\n'
         '/mybag - показать портфель Тинькофф Инвест\n'
+        '/csvbag - скачать ваш портфель в CSV\n'
         '/chart - диаграмма распределения портфеля\n'
-        '/history <TICKER> [days] - график цены тикера\n'
+        '/history <TICKER> [days] - график цены тикера\n\n'
+        '*Прочее*\n'
+        '/log - показать последние строки лога\n'
         '/help - показать эту справку'
     )
+    await update.message.reply_text(help_text, parse_mode='Markdown')
 
 
 
