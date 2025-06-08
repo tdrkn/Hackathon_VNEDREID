@@ -66,7 +66,11 @@ def make_price_history_chart(points: List[Dict]) -> io.BytesIO | None:
         mpf.make_addplot(df["lips"], color="green"),
     ]
 
-    style = mpf.make_mpf_style(base_mpf_style="nightclouds", gridstyle=":")
+    mc = mpf.make_marketcolors(up="green", down="red")
+    style = mpf.make_mpf_style(
+        base_mpf_style="nightclouds", marketcolors=mc, gridstyle=":"
+    )
+
     fig, axlist = mpf.plot(
         df,
         type="candle",
@@ -75,8 +79,7 @@ def make_price_history_chart(points: List[Dict]) -> io.BytesIO | None:
         returnfig=True,
         ylabel="Price",
         tight_layout=True,
-        upcolor="green",
-        downcolor="red",
+
     )
     ax = axlist[0]
 
