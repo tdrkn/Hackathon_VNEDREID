@@ -60,16 +60,19 @@ def make_price_history_chart(points: List[Dict]) -> io.BytesIO | None:
     df["teeth"] = pd.Series(_smma(median.tolist(), 11)).shift(5)
     df["lips"] = pd.Series(_smma(median.tolist(), 8)).shift(3)
 
+
     apds = []
     for name, color in [("jaw", "skyblue"), ("teeth", "red"), ("lips", "green")]:
         series = df[name].dropna()
         if not series.empty:
             apds.append(mpf.make_addplot(df[name], color=color))
 
+
     mc = mpf.make_marketcolors(up="green", down="red")
     style = mpf.make_mpf_style(
         base_mpf_style="nightclouds", marketcolors=mc, gridstyle=":"
     )
+
     fig, axlist = mpf.plot(
         df,
         type="candle",
@@ -78,6 +81,7 @@ def make_price_history_chart(points: List[Dict]) -> io.BytesIO | None:
         returnfig=True,
         ylabel="Price",
         tight_layout=True,
+
     )
     ax = axlist[0]
 
