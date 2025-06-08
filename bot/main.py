@@ -25,6 +25,7 @@ from .postgres import (
     init_pool as init_pg_pool,
     ensure_schema,
     fetch_ai_by_ticker,
+    fetch_ai_recent,
     fetch_recent,
     replace_portfolio,
     fetch_portfolio,
@@ -376,7 +377,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('База данных недоступна.')
         return
     try:
-        articles = await fetch_recent(PG_POOL, hours)
+        articles = await fetch_ai_recent(PG_POOL, hours)
     except Exception as e:
         logging.error('Failed to fetch news: %s', e)
         await update.message.reply_text('Ошибка получения новостей.')
@@ -385,7 +386,10 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Новостей нет.')
         return
 
-    lines = [f"*{a['title']}*\n{a['link']}" for a in articles[:10]]
+    lines = [
+        f"*{a['title']}*\n{a.get('summary_text','')}\n{a['link']}"
+        for a in articles[:10]
+    ]
     await update.message.reply_text('\n\n'.join(lines), parse_mode='Markdown')
     logging.info(
         "News command used by %s, %d articles",
