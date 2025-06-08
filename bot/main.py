@@ -191,8 +191,10 @@ async def get_news_digest(ticker: str, limit: int = 3) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
 
-        'Привет! Используйте /subscribe <TICKER>, чтобы подписаться на новости. '
-        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /chart, /help'
+
+        'Привет! Используйте /subscribe <TICKER> [...] чтобы подписаться на новости.'
+        'Доступные команды: /subscribe, /unsubscribe, /digest, /news, /csv, /csvbag, /log, /rank, /mybag, /help'
+
 
     )
 
@@ -201,7 +203,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
 
         '/start - приветственное сообщение\n'
-        '/subscribe <TICKER> - подписаться на тикер\n'
+        '/subscribe <TICKER> [...] - подписаться на один или несколько тикеров\n'
         '/unsubscribe <TICKER> - отписаться от тикера\n'
         '/digest - получить новостной дайджест по подпискам\n'
         '/rank - показать самые популярные тикеры\n'
@@ -219,12 +221,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
 
-        await update.message.reply_text('Использование: /subscribe <TICKER>')
+        await update.message.reply_text('Использование: /subscribe <TICKER> [...]')
         return
-    ticker = context.args[0]
-    await add_subscription(update.effective_user.id, ticker)
-    await update.message.reply_text(f'Вы подписались на {ticker.upper()}')
-    logging.info("%s subscribed to %s", update.effective_user.id, ticker.upper())
+    tickers = context.args
+    subs = await add_subscriptions(update.effective_user.id, tickers)
+    await update.message.reply_text(
+        'Текущие подписки: ' + ', '.join(subs)
+    )
+    logging.info(
+        "%s subscribed to %s",
+        update.effective_user.id,
+        ','.join([t.upper() for t in tickers]),
+    )
 
 
 
@@ -335,6 +343,7 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     buf.name = 'portfolio.png'
     await update.message.reply_photo(buf)
+
 
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
