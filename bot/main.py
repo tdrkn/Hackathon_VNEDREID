@@ -41,7 +41,6 @@ from .userdb import (
     add_subscriptions,
     remove_subscription,
     get_subscriptions,
-    get_rankings,
     load_token,
     save_token,
 )
@@ -200,7 +199,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/unsubscribe <TICKER> - отписаться от тикера\n\n'
         '*Новости*\n'
         '/digest - получить новостной дайджест по подпискам\n'
-        '/rank - показать самые популярные тикеры\n'
+        '/subscriptions - показать ваши подписки\n'
         '/news [hours|days|weeks N] - свежие новости за период\n'
         '/csv - скачать текущий CSV файл со статьями\n\n'
         '*Портфель*\n'
@@ -275,16 +274,6 @@ async def digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     messages = results
     await update.message.reply_text('\n\n'.join(messages), parse_mode='Markdown')
     logging.info("Digest sent to %s for %d tickers", update.effective_user.id, len(tickers))
-
-
-async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    ranking = await get_rankings()
-    if not ranking:
-        await update.message.reply_text('Подписок ещё нет.')
-        return
-    lines = [f'{idx + 1}. {ticker} — {count}' for idx, (ticker, count) in enumerate(ranking[:10])]
-    await update.message.reply_text('\n'.join(lines))
-    logging.info("Rank command used by %s", update.effective_user.id)
 
 
 async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -461,8 +450,8 @@ def main():
     app.add_handler(CommandHandler('subscribe', subscribe))
     app.add_handler(CommandHandler('unsubscribe', unsubscribe))
     app.add_handler(CommandHandler('subs', list_subscriptions))
+    app.add_handler(CommandHandler('subscriptions', list_subscriptions))
     app.add_handler(CommandHandler('digest', digest))
-    app.add_handler(CommandHandler('rank', rank))
     app.add_handler(CommandHandler('news', news))
     app.add_handler(CommandHandler('csv', send_csv))
     app.add_handler(CommandHandler('csvbag', send_csvbag))
