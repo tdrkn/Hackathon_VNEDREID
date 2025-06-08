@@ -1,7 +1,6 @@
 import os
 import logging
 
-import aiosqlite
 import pandas as pd
 import io
 
@@ -35,75 +34,19 @@ from .storage import save_articles_to_csv_async, CSV_PATH
 from .mybag import (
     get_portfolio_text,
     get_portfolio_data,
+)
+from .userdb import (
+    init_db,
+    add_subscription,
+    add_subscriptions,
+    remove_subscription,
+    get_subscriptions,
+    get_rankings,
     load_token,
     save_token,
 )
-from .plotting import make_portfolio_chart
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'subscriptions.db')
-LOG_PATH = os.path.join(os.path.dirname(__file__), 'bot.log')
-
-# Thread pool for future blocking tasks
-THREAD_POOL = ThreadPoolExecutor(max_workers=int(os.getenv('WORKERS', '8')))
-PG_POOL = None
-WAITING_TOKEN = set()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_PATH, encoding='utf-8'),
-        logging.StreamHandler(),
-    ],
-)
-
-
-
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER, ticker TEXT, UNIQUE(user_id, ticker))'
-        )
-        await conn.execute(
-            'CREATE TABLE IF NOT EXISTS tokens (user_id INTEGER PRIMARY KEY, token TEXT)'
-        )
-        await conn.commit()
-
-
-async def add_subscription(user_id: int, ticker: str):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-            (user_id, ticker.upper()),
-        )
-        await conn.commit()
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-async def add_subscriptions(user_id: int, tickers):
-    """Add multiple tickers to subscriptions."""
-    tickers_up = {t.upper() for t in tickers if t}
-    if not tickers_up:
-        return await get_subscriptions(user_id)
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.executemany(
-            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
-            [(user_id, t) for t in tickers_up],
-        )
-        await conn.commit()
-        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
-            rows = await cur.fetchall()
-    return [row[0] for row in rows]
-
-
-
-async def remove_subscription(user_id: int, ticker: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'DELETE FROM subscriptions WHERE user_id=? AND ticker=?',
             (user_id, ticker.upper()),
         )
         await conn.commit()
