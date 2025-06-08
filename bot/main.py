@@ -82,6 +82,22 @@ async def add_subscription(user_id: int, ticker: str):
     return [row[0] for row in rows]
 
 
+async def add_subscriptions(user_id: int, tickers):
+    """Add multiple tickers to subscriptions."""
+    tickers_up = {t.upper() for t in tickers if t}
+    if not tickers_up:
+        return await get_subscriptions(user_id)
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.executemany(
+            'INSERT OR IGNORE INTO subscriptions (user_id, ticker) VALUES (?, ?)',
+            [(user_id, t) for t in tickers_up],
+        )
+        await conn.commit()
+        async with conn.execute('SELECT ticker FROM subscriptions WHERE user_id=?', (user_id,)) as cur:
+            rows = await cur.fetchall()
+    return [row[0] for row in rows]
+
+
 
 async def remove_subscription(user_id: int, ticker: str) -> None:
     async with aiosqlite.connect(DB_PATH) as conn:
@@ -265,12 +281,15 @@ async def mybag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('Получаю портфель, пожалуйста подождите...')
         text = await get_portfolio_text(token)
         rows = await get_portfolio_data(token)
+        tickers = [r.get('ticker') for r in rows]
+        await add_subscriptions(user_id, [t for t in tickers if t and t not in ('-', '—')])
         if PG_POOL:
             try:
                 await replace_portfolio(PG_POOL, user_id, rows)
             except Exception as e:
                 logging.error('Failed to save portfolio: %s', e)
         await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+        await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
         return
 
     WAITING_TOKEN.add(user_id)
@@ -287,12 +306,15 @@ async def handle_token_message(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text('Токен сохранён. Получаю портфель...')
     text = await get_portfolio_text(token)
     rows = await get_portfolio_data(token)
+    tickers = [r.get('ticker') for r in rows]
+    await add_subscriptions(user_id, [t for t in tickers if t and t not in ('-', '—')])
     if PG_POOL:
         try:
             await replace_portfolio(PG_POOL, user_id, rows)
         except Exception as e:
             logging.error('Failed to save portfolio: %s', e)
     await update.message.reply_text(f'```\n{text}\n```', parse_mode='Markdown')
+    await update.message.reply_text('Тикеры портфеля добавлены в подписки.')
 
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
